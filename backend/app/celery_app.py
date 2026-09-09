@@ -22,4 +22,4 @@ if settings.UPSTASH_REDIS_URL.startswith("rediss://"):
     celery_app.conf.redis_backend_use_ssl = tls_opts
 
 # Import task modules so they register with the app.
-from app.tasks import profile_dataset  # noqa: E402,F401
+from app.tasks import profile_dataset, train_model  # noqa: E402,F401
