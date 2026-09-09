@@ -22,7 +22,6 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"  # supabase | local
     LLM_PROVIDER_MODE: str = "fake"  # live | fake
     AUTH_MODE: str = "dev"  # supabase | dev
-    INTERNAL_API_KEY: str = ""  # placeholder single-key auth for future API consumers
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]

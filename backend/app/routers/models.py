@@ -1,10 +1,14 @@
 import asyncio
+import csv
+import io
 import uuid
+from datetime import date
 
-from fastapi import APIRouter, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
+from sqlalchemy import func, select
 
-from app.dependencies import CurrentOrgId, DbSession
+from app.dependencies import CurrentOrgId, DbSession, OrgIdAnyAuth
 from app.models.dataset import Dataset
 from app.models.model import Model
 from app.models.model_candidate import ModelCandidate
@@ -29,6 +33,7 @@ from app.tasks.score_model import score_model
 from app.tasks.train_model import train_model
 
 MAX_SCORE_ROWS = 500
+MAX_CSV_ROWS = 50_000
 
 router = APIRouter(tags=["models"])
 
@@ -168,28 +173,91 @@ async def score_model_endpoint(model_id: str, organization_id: CurrentOrgId, db:
     return ScoreResponse(model_id=model.id, model_run_id=run.id)
 
 
-@router.get("/models/{model_id}/scores", response_model=ScoreRunOut)
-async def get_scores(model_id: str, organization_id: CurrentOrgId, db: DbSession) -> ScoreRunOut:
+@router.get("/models/{model_id}/scores", response_model=None)
+async def get_scores(
+    model_id: str,
+    organization_id: OrgIdAnyAuth,
+    db: DbSession,
+    format: str = Query("json", pattern="^(json|csv)$"),
+    score_date: date | None = None,
+    score_date_from: date | None = None,
+    score_date_to: date | None = None,
+    entity_id: str | None = None,
+    limit: int = Query(MAX_SCORE_ROWS, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+) -> ScoreRunOut | Response:
+    """Serves both the browser frontend (no query params -> today's latest
+    score run, unchanged; CurrentOrgId-equivalent via the dev-mode/session
+    fallback baked into OrgIdAnyAuth) and external API-key callers (date/
+    entity filters, pagination, and ?format=csv) -- one query engine so
+    export and the JSON API never drift apart."""
     model = await _get_org_model(db, model_id, organization_id)
-    latest_run = await _get_latest_run(db, model.id, run_type="score")
+    has_filters = any([score_date, score_date_from, score_date_to, entity_id])
 
-    rows: list[ScheduledScore] = []
-    if latest_run is not None:
-        result = await db.execute(
-            select(ScheduledScore)
-            .where(ScheduledScore.model_run_id == latest_run.id)
-            .order_by(ScheduledScore.entity_id)
-            .limit(MAX_SCORE_ROWS)
-        )
-        rows = list(result.scalars().all())
+    conditions = [ScheduledScore.model_id == model.id]
+    run: ModelRun | None = None
+
+    if has_filters:
+        if entity_id:
+            conditions.append(ScheduledScore.entity_id == entity_id)
+        if score_date:
+            conditions.append(ScheduledScore.score_date == score_date)
+        else:
+            if score_date_from:
+                conditions.append(ScheduledScore.score_date >= score_date_from)
+            if score_date_to:
+                conditions.append(ScheduledScore.score_date <= score_date_to)
+        order = [ScheduledScore.score_date.desc(), ScheduledScore.entity_id]
+    else:
+        # Default, no filters at all: the model's latest score run --
+        # exactly today's existing behavior, byte-for-byte, so the
+        # frontend's no-args call is unaffected.
+        run = await _get_latest_run(db, model.id, run_type="score")
+        if run is None:
+            empty = ScoreRunOut(
+                id=model.id, modeling_spec_id=model.modeling_spec_id, status=model.status,
+                run=None, rows=[], total_row_count=None,
+            )
+            return _rows_to_csv_response([]) if format == "csv" else empty
+        conditions.append(ScheduledScore.model_run_id == run.id)
+        order = [ScheduledScore.entity_id]
+
+    total_row_count = (
+        await db.execute(select(func.count()).select_from(ScheduledScore).where(*conditions))
+    ).scalar_one()
+
+    if format == "csv":
+        # Exports are "everything matching my filter," not a page --
+        # limit/offset are ignored, capped at MAX_CSV_ROWS as a safety
+        # ceiling instead.
+        result = await db.execute(select(ScheduledScore).where(*conditions).order_by(*order).limit(MAX_CSV_ROWS))
+        return _rows_to_csv_response(list(result.scalars().all()))
+
+    result = await db.execute(select(ScheduledScore).where(*conditions).order_by(*order).limit(limit).offset(offset))
+    rows = list(result.scalars().all())
 
     return ScoreRunOut(
         id=model.id,
         modeling_spec_id=model.modeling_spec_id,
         status=model.status,
-        run=ModelRunOut.model_validate(latest_run) if latest_run else None,
+        run=ModelRunOut.model_validate(run) if run else None,
         rows=[ScoredRowOut.model_validate(r) for r in rows],
-        total_row_count=latest_run.row_count_used if latest_run else None,
+        total_row_count=total_row_count,
+    )
+
+
+def _rows_to_csv_response(rows: list[ScheduledScore]) -> Response:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["entity_id", "score_date", "predicted_value", "predicted_label", "predicted_probability"])
+    for r in rows:
+        writer.writerow(
+            [r.entity_id, r.score_date.isoformat(), r.predicted_value, r.predicted_label, r.predicted_probability]
+        )
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=scores.csv"},
     )
 
 

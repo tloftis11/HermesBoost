@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { API_URL } from "../api/client";
 import { getLeaderboard, getScores, promoteCandidate, scoreModel } from "../api/models";
 import { getModelingSpec } from "../api/modelingSpecs";
 import { HyperparamsPanel } from "../components/HyperparamsPanel";
@@ -364,6 +365,16 @@ function ScoresView({ modelId }: { modelId: string }) {
         <button type="button" className="btn primary" disabled={isRunning} onClick={handleScoreNow}>
           {isRunning ? "Scoring…" : "Score now"}
         </button>
+        {run && (
+          <a
+            className="btn ghost"
+            href={`${API_URL}/api/v1/models/${modelId}/scores?format=csv`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Download CSV
+          </a>
+        )}
       </div>
 
       {error && (

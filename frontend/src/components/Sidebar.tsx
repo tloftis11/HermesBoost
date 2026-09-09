@@ -85,6 +85,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     key: "settings",
     label: "Settings",
+    to: "/settings",
     icon: (
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
         <path

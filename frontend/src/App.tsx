@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import { IntentChatPage } from "./pages/IntentChatPage";
 import { ModelResultsPage } from "./pages/ModelResultsPage";
 import { ModelsListPage } from "./pages/ModelsListPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { UploadProfilePage } from "./pages/UploadProfilePage";
 
 export function App() {
@@ -12,6 +13,7 @@ export function App() {
       <Route path="/datasets/:datasetId/analysis/:specId?" element={<IntentChatPage />} />
       <Route path="/models" element={<ModelsListPage />} />
       <Route path="/models/:modelId" element={<ModelResultsPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
     </Routes>
   );
 }

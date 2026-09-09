@@ -1,3 +1,4 @@
+from app.models.api_key import ApiKey
 from app.models.chat_message import ChatMessage
 from app.models.dataset import Dataset
 from app.models.dataset_profile import DatasetProfile
@@ -13,6 +14,7 @@ from app.models.organization import Organization
 from app.models.scheduled_score import ScheduledScore
 
 __all__ = [
+    "ApiKey",
     "Organization",
     "Dataset",
     "DatasetProfile",

@@ -312,3 +312,134 @@ async def test_promote_candidate_rejects_foreign_candidate(client, completed_mod
         json={"candidate_id": str(uuid.uuid4())},
     )
     assert resp.status_code == 404
+
+
+@pytest_asyncio.fixture
+async def multi_day_scores(db_session, default_org_id, completed_model_with_leaderboard):
+    """Two score runs on different dates, each scoring two entities, so
+    date/entity/range filtering has something real to distinguish."""
+    from datetime import datetime, timedelta, timezone
+
+    model = completed_model_with_leaderboard
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    # Explicit, distinct started_at values -- both rows would otherwise be
+    # created in the same transaction and tie on server_default=func.now(),
+    # making "latest run" ambiguous (the same class of issue the leaderboard
+    # sort already works around by sorting in Python instead of SQL).
+    run_yesterday = ModelRun(
+        organization_id=default_org_id, model_id=model.id, run_type="score",
+        status="completed", row_count_used=2,
+        started_at=datetime.combine(yesterday, datetime.min.time(), tzinfo=timezone.utc),
+    )
+    run_today = ModelRun(
+        organization_id=default_org_id, model_id=model.id, run_type="score",
+        status="completed", row_count_used=2,
+        started_at=datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc),
+    )
+    db_session.add_all([run_yesterday, run_today])
+    await db_session.flush()
+
+    db_session.add_all([
+        ScheduledScore(
+            organization_id=default_org_id, model_id=model.id, model_run_id=run_yesterday.id,
+            model_candidate_id=model.active_candidate_id, entity_id="1",
+            score_date=yesterday, predicted_label="A", predicted_probability=0.9,
+        ),
+        ScheduledScore(
+            organization_id=default_org_id, model_id=model.id, model_run_id=run_yesterday.id,
+            model_candidate_id=model.active_candidate_id, entity_id="2",
+            score_date=yesterday, predicted_label="B", predicted_probability=0.5,
+        ),
+        ScheduledScore(
+            organization_id=default_org_id, model_id=model.id, model_run_id=run_today.id,
+            model_candidate_id=model.active_candidate_id, entity_id="1",
+            score_date=today, predicted_label="A", predicted_probability=0.95,
+        ),
+        ScheduledScore(
+            organization_id=default_org_id, model_id=model.id, model_run_id=run_today.id,
+            model_candidate_id=model.active_candidate_id, entity_id="2",
+            score_date=today, predicted_label="B", predicted_probability=0.6,
+        ),
+    ])
+    await db_session.commit()
+    return model, yesterday, today
+
+
+async def test_get_scores_default_still_returns_only_latest_run(client, multi_day_scores):
+    model, yesterday, today = multi_day_scores
+    resp = await client.get(f"/api/v1/models/{model.id}/scores")
+    body = resp.json()
+    assert len(body["rows"]) == 2
+    assert all(r["score_date"] == today.isoformat() for r in body["rows"])
+    assert body["run"] is not None  # single-run default still populates run metadata
+
+
+async def test_get_scores_exact_date_filter(client, multi_day_scores):
+    model, yesterday, today = multi_day_scores
+    resp = await client.get(f"/api/v1/models/{model.id}/scores", params={"score_date": yesterday.isoformat()})
+    body = resp.json()
+    assert len(body["rows"]) == 2
+    assert all(r["score_date"] == yesterday.isoformat() for r in body["rows"])
+    assert body["run"] is None  # filtered query -- no single-run metadata
+
+
+async def test_get_scores_date_range_filter(client, multi_day_scores):
+    model, yesterday, today = multi_day_scores
+    resp = await client.get(
+        f"/api/v1/models/{model.id}/scores",
+        params={"score_date_from": yesterday.isoformat(), "score_date_to": today.isoformat()},
+    )
+    body = resp.json()
+    assert len(body["rows"]) == 4
+    assert body["total_row_count"] == 4
+
+
+async def test_get_scores_entity_filter_spans_dates(client, multi_day_scores):
+    model, yesterday, today = multi_day_scores
+    resp = await client.get(f"/api/v1/models/{model.id}/scores", params={"entity_id": "1"})
+    body = resp.json()
+    assert len(body["rows"]) == 2
+    assert all(r["entity_id"] == "1" for r in body["rows"])
+    assert {r["score_date"] for r in body["rows"]} == {yesterday.isoformat(), today.isoformat()}
+
+
+async def test_get_scores_csv_format(client, multi_day_scores):
+    model, yesterday, today = multi_day_scores
+    resp = await client.get(
+        f"/api/v1/models/{model.id}/scores",
+        params={"score_date_from": yesterday.isoformat(), "score_date_to": today.isoformat(), "format": "csv"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    lines = resp.text.strip().splitlines()
+    assert lines[0] == "entity_id,score_date,predicted_value,predicted_label,predicted_probability"
+    assert len(lines) == 5  # header + 4 rows
+
+
+async def test_get_scores_pagination_limit(client, multi_day_scores):
+    model, yesterday, today = multi_day_scores
+    resp = await client.get(
+        f"/api/v1/models/{model.id}/scores",
+        params={"score_date_from": yesterday.isoformat(), "score_date_to": today.isoformat(), "limit": 1},
+    )
+    body = resp.json()
+    assert len(body["rows"]) == 1
+    assert body["total_row_count"] == 4  # total matching the filter, not just this page
+
+
+async def test_get_scores_with_valid_api_key(client, multi_day_scores):
+    model, _yesterday, _today = multi_day_scores
+    created = (await client.post("/api/v1/api-keys", json={"name": "external"})).json()
+
+    resp = await client.get(f"/api/v1/models/{model.id}/scores", headers={"x-api-key": created["raw_key"]})
+    assert resp.status_code == 200
+    assert len(resp.json()["rows"]) == 2
+
+
+async def test_get_scores_with_invalid_api_key_401s(client, multi_day_scores):
+    model, _yesterday, _today = multi_day_scores
+    resp = await client.get(f"/api/v1/models/{model.id}/scores", headers={"x-api-key": "bogus"})
+    assert resp.status_code == 401

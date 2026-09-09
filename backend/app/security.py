@@ -1,4 +1,5 @@
-"""Auth resolution: AUTH_MODE=dev|supabase, plus a placeholder API-key check.
+"""Auth resolution: AUTH_MODE=dev|supabase for the browser frontend, plus a
+real per-organization API-key path for external/non-browser consumers.
 
 Dev mode (AUTH_MODE=dev): every request resolves to the single seeded default
 organization -- no login required. This is intentional for milestone 1 (see
@@ -9,14 +10,23 @@ Supabase mode (AUTH_MODE=supabase): the session JWT is actually verified
 against SUPABASE_JWT_SECRET. Organization resolution still falls back to the
 default org for now, since a user->organization membership table doesn't
 exist yet in this milestone's schema -- that arrives with real multi-tenancy.
+
+API keys (milestone 6): a real, hashed, revocable, per-org api_keys table,
+checked via the X-API-Key header -- deliberately not Authorization: Bearer,
+to avoid colliding with the Supabase session-JWT bearer convention above.
 """
+
+from datetime import datetime, timezone
 
 import jwt
 from fastapi import HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.organizations import get_default_organization_id
+from app.models.api_key import ApiKey
+from app.services.hashing import sha256_hex
 
 
 class CurrentUser:
@@ -66,18 +76,32 @@ async def resolve_current_org(request: Request, db: AsyncSession) -> str:
     return await get_default_organization_id(db)
 
 
-async def check_api_key(request: Request) -> str:
-    """Placeholder API-key auth path for future non-browser consumers.
+async def resolve_org_from_api_key(request: Request, db: AsyncSession) -> str:
+    """Resolves an organization from a real X-API-Key header, checked
+    against the hashed, revocable api_keys table. Raises 401 on anything
+    missing/invalid/revoked -- an external caller that sent a bad key
+    should never silently fall through to some default."""
+    raw_key = request.headers.get("x-api-key")
+    if not raw_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing API key")
 
-    Not wired to any milestone-1 endpoint yet -- the design doc calls for
-    API-key auth eventually, but nothing in this slice consumes it. Checks a
-    single configured key rather than a real per-org api_keys table (which
-    doesn't exist in this migration yet).
-    """
-    api_key = request.headers.get("x-api-key")
-    if not api_key or not settings.INTERNAL_API_KEY or api_key != settings.INTERNAL_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid API key",
-        )
-    return api_key
+    key_hash = sha256_hex(raw_key.encode())
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.revoked_at.is_(None))
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or revoked API key")
+
+    row.last_used_at = datetime.now(timezone.utc)
+    await db.commit()
+    return row.organization_id
+
+
+async def resolve_org_any_auth(request: Request, db: AsyncSession) -> str:
+    """Dual-auth: an X-API-Key header (external callers) takes priority and
+    must be valid; otherwise falls back to the existing dev-mode/session
+    path (the browser frontend, which never sends that header)."""
+    if request.headers.get("x-api-key"):
+        return await resolve_org_from_api_key(request, db)
+    return await resolve_current_org(request, db)
