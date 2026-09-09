@@ -1,0 +1,67 @@
+services:
+  - type: web
+    name: hermesboost-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: LLM_PROVIDER_MODE
+        value: live
+      - key: AUTH_MODE
+        value: dev
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "false"
+      - key: CORS_ORIGINS
+        value: '["https://hermesboost-frontend.onrender.com"]'
+
+  - type: worker
+    name: hermesboost-worker
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: LLM_PROVIDER_MODE
+        value: live
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "false"
+
+  - type: web
+    name: hermesboost-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false
