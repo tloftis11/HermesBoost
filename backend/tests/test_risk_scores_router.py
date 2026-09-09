@@ -301,3 +301,31 @@ async def test_delete_risk_score(client, probability_model, magnitude_model):
 
     get_resp = await client.get(f"/api/v1/risk-scores/{created['id']}")
     assert get_resp.status_code == 404
+
+
+async def test_create_risk_score_rejects_duplicate_name(client, probability_model, magnitude_model):
+    await client.post("/api/v1/risk-scores", json=_create_body(probability_model, magnitude_model))
+
+    resp = await client.post("/api/v1/risk-scores", json=_create_body(probability_model, magnitude_model))
+    assert resp.status_code == 409
+
+
+async def test_get_risk_scores_resolves_by_name(client, probability_model, magnitude_model):
+    await client.post("/api/v1/risk-scores", json=_create_body(probability_model, magnitude_model))
+
+    resp = await client.get("/api/v1/risk-scores/measles hurdle risk score/scores")
+    assert resp.status_code == 200
+    assert resp.json()["total_row_count"] == 90
+
+
+async def test_get_risk_score_usage_shape(client, probability_model, magnitude_model):
+    created = (
+        await client.post("/api/v1/risk-scores", json=_create_body(probability_model, magnitude_model))
+    ).json()
+
+    resp = await client.get(f"/api/v1/risk-scores/{created['id']}/usage")
+    assert resp.status_code == 200
+    body = resp.json()
+    field_names = [f["field"] for f in body["response_fields"]]
+    assert field_names == ["entity_id", "score_date", "probability", "predicted_magnitude", "risk_score"]
+    assert "curl" in body["curl_example"]

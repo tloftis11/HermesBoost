@@ -29,6 +29,9 @@ class Model(Base):
         Uuid(as_uuid=False), ForeignKey("modeling_specs.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="training")
+    # User-settable, for addressing this model by name instead of only its
+    # UUID (external API consumers). Nullable -- unset until named.
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
     active_candidate_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
         ForeignKey("model_candidates.id", use_alter=True, name="fk_models_active_candidate"),

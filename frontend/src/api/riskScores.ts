@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { RiskScoreOut, RiskScoreResult } from "../types";
+import type { RiskScoreOut, RiskScoreResult, UsageDoc } from "../types";
 
 export async function listRiskScores(): Promise<RiskScoreOut[]> {
   return request<RiskScoreOut[]>("/api/v1/risk-scores");
@@ -28,4 +28,8 @@ export async function getRiskScoreResults(id: string): Promise<RiskScoreResult> 
 
 export async function deleteRiskScore(id: string): Promise<void> {
   await request<void>(`/api/v1/risk-scores/${id}`, { method: "DELETE" });
+}
+
+export async function getRiskScoreUsage(id: string): Promise<UsageDoc> {
+  return request<UsageDoc>(`/api/v1/risk-scores/${id}/usage`);
 }

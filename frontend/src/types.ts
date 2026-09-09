@@ -132,10 +132,22 @@ export interface ModelRun {
 export interface ModelGuided {
   id: string;
   modeling_spec_id: string;
+  name: string | null;
   status: ModelStatus;
   error_message: string | null;
   active_candidate: ModelCandidate | null;
   latest_run: ModelRun | null;
+}
+
+export interface ResponseFieldDoc {
+  field: string;
+  meaning: string;
+}
+
+export interface UsageDoc {
+  what_it_predicts: string;
+  response_fields: ResponseFieldDoc[];
+  curl_example: string;
 }
 
 export interface Leaderboard {
@@ -154,6 +166,7 @@ export interface BuildModelResponse {
 export interface ModelListItem {
   id: string;
   modeling_spec_id: string;
+  name: string | null;
   dataset_name: string;
   task_description: string | null;
   status: ModelStatus;

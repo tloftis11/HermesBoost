@@ -16,6 +16,7 @@ from app.models.model_run import ModelRun
 from app.models.modeling_spec import ModelingSpec
 from app.models.scheduled_score import ScheduledScore
 from app.routers.modeling_specs import _get_org_spec
+from app.config import settings
 from app.schemas.model import (
     BuildResponse,
     LeaderboardOut,
@@ -23,10 +24,13 @@ from app.schemas.model import (
     ModelGuidedOut,
     ModelListItemOut,
     ModelRunOut,
+    ModelUpdate,
     PromoteCandidateRequest,
+    ResponseFieldDoc,
     ScoredRowOut,
     ScoreResponse,
     ScoreRunOut,
+    UsageDocOut,
 )
 from app.services.dataset_profiles import get_latest_profile
 from app.services.ml.imbalance import is_imbalanced, minority_rate
@@ -73,6 +77,7 @@ async def list_models(organization_id: CurrentOrgId, db: DbSession) -> list[Mode
             ModelListItemOut(
                 id=model.id,
                 modeling_spec_id=model.modeling_spec_id,
+                name=model.name,
                 dataset_name=dataset.name if dataset else "(deleted dataset)",
                 task_description=spec.task_description if spec else None,
                 status=model.status,
@@ -134,10 +139,77 @@ async def get_model(model_id: str, organization_id: CurrentOrgId, db: DbSession)
     return ModelGuidedOut(
         id=model.id,
         modeling_spec_id=model.modeling_spec_id,
+        name=model.name,
         status=model.status,
         error_message=model.error_message,
         active_candidate=ModelCandidateOut.model_validate(active_candidate) if active_candidate else None,
         latest_run=ModelRunOut.model_validate(latest_run) if latest_run else None,
+    )
+
+
+@router.patch("/models/{model_id}", response_model=ModelGuidedOut)
+async def update_model(
+    model_id: str, body: ModelUpdate, organization_id: CurrentOrgId, db: DbSession
+) -> ModelGuidedOut:
+    model = await _get_org_model(db, model_id, organization_id)
+
+    existing = await db.execute(
+        select(Model).where(Model.organization_id == organization_id, Model.name == body.name)
+    )
+    conflict = existing.scalar_one_or_none()
+    if conflict is not None and conflict.id != model.id:
+        raise HTTPException(status_code=409, detail=f"A model named '{body.name}' already exists.")
+
+    model.name = body.name
+    await db.commit()
+
+    return await get_model(model.id, organization_id, db)
+
+
+@router.get("/models/{model_id}/usage", response_model=UsageDocOut)
+async def get_model_usage(model_id: str, organization_id: OrgIdAnyAuth, db: DbSession) -> UsageDocOut:
+    model = await _get_org_model(db, model_id, organization_id)
+    spec = await db.get(ModelingSpec, model.modeling_spec_id)
+    candidate = await db.get(ModelCandidate, model.active_candidate_id) if model.active_candidate_id else None
+    ml_task = candidate.ml_task if candidate else spec.task_type if spec else None
+
+    fields = [ResponseFieldDoc(field="entity_id", meaning="Which row/entity this score is for.")]
+    fields.append(ResponseFieldDoc(field="score_date", meaning="The date this score was computed for."))
+    if ml_task == "classification":
+        fields.append(
+            ResponseFieldDoc(
+                field="predicted_label",
+                meaning=spec.task_description if spec and spec.task_description else "The predicted class.",
+            )
+        )
+        fields.append(
+            ResponseFieldDoc(
+                field="predicted_probability",
+                meaning="Confidence in predicted_label, from 0 to 1.",
+            )
+        )
+    else:
+        fields.append(
+            ResponseFieldDoc(
+                field="predicted_value",
+                meaning=spec.task_description if spec and spec.task_description else "The predicted value.",
+            )
+        )
+
+    reference = model.name or model.id
+    base_url = settings.PUBLIC_API_BASE_URL or "https://your-api-domain.example.com"
+    curl_example = (
+        f"curl -H \"X-API-Key: $HERMESBOOST_API_KEY\" "
+        f"\"{base_url}/api/v1/models/{reference}/scores\""
+    )
+    if not settings.PUBLIC_API_BASE_URL:
+        curl_example += "\n# Replace the host above with this org's real API base URL."
+    curl_example += "\n# Create an API key from the Settings page."
+
+    return UsageDocOut(
+        what_it_predicts=spec.task_description if spec and spec.task_description else "No description available.",
+        response_fields=fields,
+        curl_example=curl_example,
     )
 
 
@@ -346,7 +418,17 @@ async def _get_org_model(db: DbSession, model_id: str, organization_id: str) -> 
     try:
         uuid.UUID(model_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Model not found") from None
+        # Not a UUID -- treat it as a user-assigned name instead, so every
+        # endpoint that takes {model_id} also works with a name a user set
+        # via PATCH /models/{id}, for external API consumers who'd rather
+        # not hardcode a UUID.
+        result = await db.execute(
+            select(Model).where(Model.organization_id == organization_id, Model.name == model_id)
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            raise HTTPException(status_code=404, detail="Model not found")
+        return model
 
     model = await db.get(Model, model_id)
     if model is None or str(model.organization_id) != str(organization_id):

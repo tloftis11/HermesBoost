@@ -17,12 +17,14 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import select
 
+from app.config import settings
 from app.dependencies import CurrentOrgId, DbSession, OrgIdAnyAuth
 from app.models.model import Model
 from app.models.model_candidate import ModelCandidate
 from app.models.modeling_spec import ModelingSpec
 from app.models.risk_score import RiskScore
 from app.routers.models import _get_org_model
+from app.schemas.model import ResponseFieldDoc, UsageDocOut
 from app.schemas.risk_score import (
     RiskScoreCreate,
     RiskScoreOut,
@@ -44,6 +46,12 @@ async def create_risk_score(
 ) -> RiskScore:
     if body.probability_model_id == body.magnitude_model_id:
         raise HTTPException(status_code=400, detail="Choose two different models to combine.")
+
+    existing = await db.execute(
+        select(RiskScore).where(RiskScore.organization_id == organization_id, RiskScore.name == body.name)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail=f"A risk score named '{body.name}' already exists.")
 
     prob_model = await _get_org_model(db, body.probability_model_id, organization_id)
     mag_model = await _get_org_model(db, body.magnitude_model_id, organization_id)
@@ -172,6 +180,45 @@ async def get_risk_scores(
     )
 
 
+@router.get("/{risk_score_id}/usage", response_model=UsageDocOut)
+async def get_risk_score_usage(
+    risk_score_id: str, organization_id: OrgIdAnyAuth, db: DbSession
+) -> UsageDocOut:
+    risk_score = await _get_org_risk_score(db, risk_score_id, organization_id)
+
+    reference = risk_score.name or risk_score.id
+    base_url = settings.PUBLIC_API_BASE_URL or "https://your-api-domain.example.com"
+    curl_example = (
+        f"curl -H \"X-API-Key: $HERMESBOOST_API_KEY\" "
+        f"\"{base_url}/api/v1/risk-scores/{reference}/scores\""
+    )
+    if not settings.PUBLIC_API_BASE_URL:
+        curl_example += "\n# Replace the host above with this org's real API base URL."
+    curl_example += "\n# Create an API key from the Settings page."
+
+    return UsageDocOut(
+        what_it_predicts=(
+            f"Combines two models into one ranked score: the probability of "
+            f"'{risk_score.positive_label}' times the predicted magnitude if it "
+            f"occurs -- higher risk_score means higher combined risk."
+        ),
+        response_fields=[
+            ResponseFieldDoc(field="entity_id", meaning="Which row/entity this score is for."),
+            ResponseFieldDoc(field="score_date", meaning="The date this score was computed for."),
+            ResponseFieldDoc(
+                field="probability", meaning=f"Predicted probability of '{risk_score.positive_label}', 0 to 1."
+            ),
+            ResponseFieldDoc(
+                field="predicted_magnitude", meaning="Predicted magnitude from the second-stage model."
+            ),
+            ResponseFieldDoc(
+                field="risk_score", meaning="probability * predicted_magnitude -- the combined, ranked score."
+            ),
+        ],
+        curl_example=curl_example,
+    )
+
+
 def _select_and_coerce(df: pd.DataFrame, candidate: ModelCandidate) -> pd.DataFrame:
     missing = [c for c in candidate.feature_columns if c not in df.columns]
     if missing:
@@ -217,7 +264,14 @@ async def _get_org_risk_score(db: DbSession, risk_score_id: str, organization_id
     try:
         uuid.UUID(risk_score_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Risk score not found") from None
+        # Not a UUID -- treat it as the risk score's (unique, required) name.
+        result = await db.execute(
+            select(RiskScore).where(RiskScore.organization_id == organization_id, RiskScore.name == risk_score_id)
+        )
+        risk_score = result.scalar_one_or_none()
+        if risk_score is None:
+            raise HTTPException(status_code=404, detail="Risk score not found")
+        return risk_score
 
     risk_score = await db.get(RiskScore, risk_score_id)
     if risk_score is None or str(risk_score.organization_id) != str(organization_id):

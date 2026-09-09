@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { API_URL } from "../api/client";
-import { getLeaderboard, getScores, promoteCandidate, scoreModel } from "../api/models";
+import { getLeaderboard, getModelUsage, getScores, promoteCandidate, scoreModel, updateModel } from "../api/models";
 import { getModelingSpec } from "../api/modelingSpecs";
 import { HyperparamsPanel } from "../components/HyperparamsPanel";
 import { KeyDriversList } from "../components/KeyDriversList";
@@ -10,9 +10,9 @@ import { RunMetadataFooter } from "../components/RunMetadataFooter";
 import { ScoreResultsTable } from "../components/ScoreResultsTable";
 import { Sidebar } from "../components/Sidebar";
 import { useModelRun } from "../hooks/useModelRun";
-import type { Leaderboard as LeaderboardData, ModelGuided, ModelingSpec, ScoreRun } from "../types";
+import type { Leaderboard as LeaderboardData, ModelGuided, ModelingSpec, ScoreRun, UsageDoc } from "../types";
 
-type ViewMode = "guided" | "advanced" | "scores";
+type ViewMode = "guided" | "advanced" | "scores" | "api";
 
 const SCORE_POLL_INTERVAL_MS = 2000;
 
@@ -116,6 +116,13 @@ export function ModelResultsPage() {
                 >
                   Scores
                 </button>
+                <button
+                  type="button"
+                  className={`seg-btn${view === "api" ? " active" : ""}`}
+                  onClick={() => setView("api")}
+                >
+                  API
+                </button>
               </div>
               <button
                 type="button"
@@ -159,8 +166,10 @@ export function ModelResultsPage() {
               onPromote={handlePromote}
               promoting={promoting}
             />
-          ) : (
+          ) : view === "scores" ? (
             <ScoresView modelId={modelId!} />
+          ) : (
+            <ApiUsageView modelId={modelId!} initialName={model.name} />
           )}
         </div>
       </div>
@@ -410,6 +419,105 @@ function ScoresView({ modelId }: { modelId: string }) {
           )}
           <ScoreResultsTable rows={scoreRun?.rows ?? []} />
         </>
+      )}
+    </>
+  );
+}
+
+function ApiUsageView({ modelId, initialName }: { modelId: string; initialName: string | null }) {
+  const [name, setName] = useState(initialName ?? "");
+  const [saving, setSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageDoc | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    getModelUsage(modelId)
+      .then(setUsage)
+      .catch(() => {});
+  }, [modelId]);
+
+  const handleSaveName = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    setNameError(null);
+    try {
+      await updateModel(modelId, name.trim());
+      const refreshed = await getModelUsage(modelId);
+      setUsage(refreshed);
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : "Could not save name");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCopy = () => {
+    if (!usage) return;
+    navigator.clipboard?.writeText(usage.curl_example).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <>
+      <div className="card" style={{ maxWidth: 640, marginBottom: 16 }}>
+        <h3>Name this model</h3>
+        <p className="spec-caption">
+          Give it a short, memorable name so external callers can address it instead of its UUID.
+        </p>
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <input
+            className="search-input"
+            style={{ margin: 0, flex: 1 }}
+            placeholder="e.g. measles-county-risk"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button type="button" className="btn primary" disabled={saving || !name.trim()} onClick={handleSaveName}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+        {nameError && (
+          <p className="spec-caption" style={{ color: "var(--bad)", marginTop: 8 }}>
+            {nameError}
+          </p>
+        )}
+      </div>
+
+      {usage && (
+        <div className="card" style={{ maxWidth: 640 }}>
+          <h3>Using this model via API</h3>
+          <p className="spec-caption">{usage.what_it_predicts}</p>
+
+          <table style={{ marginTop: 12 }}>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.response_fields.map((f) => (
+                <tr key={f.field}>
+                  <td className="mono">{f.field}</td>
+                  <td>{f.meaning}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+            <span className="spec-label">Example request</span>
+            <button type="button" className="btn ghost" onClick={handleCopy}>
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          <pre className="card mono" style={{ marginTop: 6, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+            {usage.curl_example}
+          </pre>
+        </div>
       )}
     </>
   );

@@ -32,5 +32,11 @@ class Settings(BaseSettings):
     # AutoML
     FLAML_TIME_BUDGET_SECONDS: int = 60
 
+    # This org's own public API base URL -- used only to build a
+    # ready-to-run curl example in GET /models/{id}/usage and
+    # GET /risk-scores/{id}/usage. Set to the deployed API's real URL
+    # (e.g. https://hermesboost-api.onrender.com); left blank in dev.
+    PUBLIC_API_BASE_URL: str = ""
+
 
 settings = Settings()

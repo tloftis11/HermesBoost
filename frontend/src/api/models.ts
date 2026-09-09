@@ -1,5 +1,13 @@
 import { request } from "./client";
-import type { BuildModelResponse, Leaderboard, ModelGuided, ModelListItem, ScoreResponse, ScoreRun } from "../types";
+import type {
+  BuildModelResponse,
+  Leaderboard,
+  ModelGuided,
+  ModelListItem,
+  ScoreResponse,
+  ScoreRun,
+  UsageDoc,
+} from "../types";
 
 export async function listModels(): Promise<ModelListItem[]> {
   return request<ModelListItem[]>("/api/v1/models");
@@ -37,4 +45,16 @@ export async function promoteCandidate(modelId: string, candidateId: string): Pr
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ candidate_id: candidateId }),
   });
+}
+
+export async function updateModel(modelId: string, name: string): Promise<ModelGuided> {
+  return request<ModelGuided>(`/api/v1/models/${modelId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function getModelUsage(modelId: string): Promise<UsageDoc> {
+  return request<UsageDoc>(`/api/v1/models/${modelId}/usage`);
 }

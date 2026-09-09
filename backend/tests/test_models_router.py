@@ -532,3 +532,52 @@ async def test_get_scores_with_invalid_api_key_401s(client, multi_day_scores):
     model, _yesterday, _today = multi_day_scores
     resp = await client.get(f"/api/v1/models/{model.id}/scores", headers={"x-api-key": "bogus"})
     assert resp.status_code == 401
+
+
+async def test_patch_model_sets_name_and_resolves_by_it(client, completed_model_with_leaderboard):
+    model = completed_model_with_leaderboard
+    resp = await client.patch(f"/api/v1/models/{model.id}", json={"name": "flu-risk"})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "flu-risk"
+
+    by_name = await client.get("/api/v1/models/flu-risk")
+    assert by_name.status_code == 200
+    assert by_name.json()["id"] == model.id
+
+
+async def test_get_model_unknown_name_404s(client):
+    resp = await client.get("/api/v1/models/not-a-real-name")
+    assert resp.status_code == 404
+
+
+async def test_patch_model_duplicate_name_409s(
+    client, db_session, default_org_id, confirmed_spec, completed_model_with_leaderboard
+):
+    await client.patch(f"/api/v1/models/{completed_model_with_leaderboard.id}", json={"name": "taken"})
+
+    other_model = Model(organization_id=default_org_id, modeling_spec_id=confirmed_spec.id, status="training")
+    db_session.add(other_model)
+    await db_session.commit()
+    await db_session.refresh(other_model)
+
+    resp = await client.patch(f"/api/v1/models/{other_model.id}", json={"name": "taken"})
+    assert resp.status_code == 409
+
+
+async def test_patch_model_own_current_name_is_not_a_false_conflict(client, completed_model_with_leaderboard):
+    model = completed_model_with_leaderboard
+    await client.patch(f"/api/v1/models/{model.id}", json={"name": "steady"})
+
+    resp = await client.patch(f"/api/v1/models/{model.id}", json={"name": "steady"})
+    assert resp.status_code == 200
+
+
+async def test_get_model_usage_classification_shape(client, completed_model_with_leaderboard):
+    model = completed_model_with_leaderboard
+    resp = await client.get(f"/api/v1/models/{model.id}/usage")
+    assert resp.status_code == 200
+    body = resp.json()
+    field_names = [f["field"] for f in body["response_fields"]]
+    assert field_names == ["entity_id", "score_date", "predicted_label", "predicted_probability"]
+    assert "curl" in body["curl_example"]
+    assert f"/models/{model.id}/scores" in body["curl_example"] or "models/" in body["curl_example"]

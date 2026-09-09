@@ -44,6 +44,7 @@ class ModelGuidedOut(BaseModel):
 
     id: str
     modeling_spec_id: str
+    name: str | None = None
     status: str
     error_message: str | None = None
     active_candidate: ModelCandidateOut | None = None
@@ -67,6 +68,7 @@ class ModelListItemOut(BaseModel):
 
     id: str
     modeling_spec_id: str
+    name: str | None = None
     dataset_name: str
     task_description: str | None = None
     status: str
@@ -75,6 +77,21 @@ class ModelListItemOut(BaseModel):
     primary_metric_label: str | None = None
     primary_metric_value: float | None = None
     updated_at: datetime
+
+
+class ModelUpdate(BaseModel):
+    name: str
+
+
+class ResponseFieldDoc(BaseModel):
+    field: str
+    meaning: str
+
+
+class UsageDocOut(BaseModel):
+    what_it_predicts: str
+    response_fields: list[ResponseFieldDoc]
+    curl_example: str
 
 
 class ScoreResponse(BaseModel):
