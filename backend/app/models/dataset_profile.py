@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, UniqueConstraint, Uuid, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -28,5 +28,7 @@ class DatasetProfile(Base):
     columns: Mapped[list] = mapped_column(JSON, nullable=False)
     ai_description: Mapped[str | None] = mapped_column(String, nullable=True)
     ai_description_model: Mapped[str | None] = mapped_column(String, nullable=True)
-    ai_description_generated_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    profiled_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    ai_description_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    profiled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

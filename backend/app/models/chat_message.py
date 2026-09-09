@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -27,4 +27,6 @@ class ChatMessage(Base):
     # that back as history next turn is how the model sees its own prior
     # structured spec state. role='user' rows are plain text.
     content: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )

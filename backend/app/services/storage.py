@@ -57,3 +57,13 @@ def get_storage_backend() -> StorageBackend:
             else SupabaseStorageBackend()
         )
     return _backend
+
+
+def set_storage_backend_for_tests(backend: StorageBackend) -> None:
+    """Test-only hook: force a specific backend (e.g. a LocalStorageBackend
+    pointed at a pytest tmp_path), bypassing the STORAGE_BACKEND env var
+    entirely. Tests must never depend on -- or leak into -- whatever a
+    developer's local .env happens to be pointed at (this is how two stray
+    files ended up in the real Supabase bucket during dev)."""
+    global _backend
+    _backend = backend

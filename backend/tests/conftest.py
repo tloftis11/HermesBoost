@@ -12,6 +12,7 @@ from app.db import Base
 from app.dependencies import get_db
 from app.main import create_app
 from app.models.organization import Organization
+from app.services.storage import LocalStorageBackend, set_storage_backend_for_tests
 
 
 @pytest.fixture
@@ -60,11 +61,16 @@ async def db_session(test_engine, default_org_id):
 
 
 @pytest_asyncio.fixture
-async def client(db_session, monkeypatch):
+async def client(db_session, monkeypatch, tmp_path):
     # Router tests exercise the sync/async boundary (upload -> enqueue) but
     # not the worker pipeline itself -- that's covered by the full local
     # smoke test. Stub the enqueue call to a no-op recorder.
     monkeypatch.setattr("app.routers.datasets.profile_dataset.delay", lambda *a, **k: None)
+
+    # Force local, tmp-dir-scoped storage regardless of the developer's local
+    # .env -- STORAGE_BACKEND=supabase during dev once leaked real file writes
+    # into the real Supabase bucket via this exact fixture.
+    set_storage_backend_for_tests(LocalStorageBackend(base_dir=str(tmp_path)))
 
     app = create_app()
 

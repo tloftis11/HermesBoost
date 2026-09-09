@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -27,4 +27,6 @@ class LlmUsageLog(Base):
     request_id: Mapped[str | None] = mapped_column(String, nullable=True)
     related_table: Mapped[str | None] = mapped_column(String, nullable=True)
     related_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )

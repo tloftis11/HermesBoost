@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Numeric, String, Uuid, func
+from sqlalchemy import DateTime, Numeric, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -22,4 +22,4 @@ class Organization(Base):
     monthly_llm_budget_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False, default=Decimal("20.00")
     )
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Uuid, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -28,5 +28,7 @@ class Dataset(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="uploaded")
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
     uploaded_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
