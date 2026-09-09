@@ -28,7 +28,10 @@ from app.schemas.model import (
     ScoreResponse,
     ScoreRunOut,
 )
+from app.services.dataset_profiles import get_latest_profile
+from app.services.ml.imbalance import is_imbalanced, minority_rate
 from app.services.ml.task_mapping import UnsupportedTaskTypeError, to_ml_task
+from app.services.profiling import TOP_VALUES_LIMIT
 from app.tasks.score_model import score_model
 from app.tasks.train_model import train_model
 
@@ -91,6 +94,9 @@ async def build_model(spec_id: str, organization_id: CurrentOrgId, db: DbSession
         to_ml_task(spec.task_type)
     except UnsupportedTaskTypeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if spec.task_type == "classification" and not spec.acknowledged_imbalance:
+        await _raise_if_imbalanced_and_unacknowledged(db, spec)
 
     result = await db.execute(
         select(Model).where(Model.modeling_spec_id == spec_id, Model.organization_id == organization_id)
@@ -293,6 +299,47 @@ async def get_model_for_spec(spec_id: str, organization_id: CurrentOrgId, db: Db
     if model is None:
         raise HTTPException(status_code=404, detail="No model has been built for this spec yet")
     return await get_model(model.id, organization_id, db)
+
+
+async def _raise_if_imbalanced_and_unacknowledged(db: DbSession, spec: ModelingSpec) -> None:
+    """Fast, best-effort pre-flight check from the dataset's already-
+    computed profile -- a courtesy warning before spending training
+    compute. Deliberately skips (proceeds straight to training) when the
+    target has more distinct classes than the profile's capped top_values
+    list can reliably represent; train.py's own check on the real
+    y_train, computed at fit time, is what actually decides whether class
+    weighting gets applied, and is never skipped."""
+    dataset = await db.get(Dataset, spec.dataset_id)
+    if dataset is None:
+        return
+    profile = await get_latest_profile(db, dataset)
+    if profile is None:
+        return
+
+    target_col = next((c for c in profile.columns if c["name"] == spec.target), None)
+    if target_col is None or not target_col.get("top_values"):
+        return
+    if target_col.get("distinct_count", 0) > TOP_VALUES_LIMIT:
+        return
+
+    counts = {tv["value"]: tv["count"] for tv in target_col["top_values"]}
+    rate = minority_rate(counts)
+    if not is_imbalanced(rate):
+        return
+
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "imbalance_ack_required",
+            "minority_rate": rate,
+            "message": (
+                f"This target's minority class is only {rate:.1%} of rows. Building will apply "
+                "class weighting during fitting and report an additional operating point (the "
+                "threshold that maximizes F1) alongside the standard metrics. PATCH this spec "
+                "with acknowledge_imbalance=true to proceed."
+            ),
+        },
+    )
 
 
 async def _get_org_model(db: DbSession, model_id: str, organization_id: str) -> Model:

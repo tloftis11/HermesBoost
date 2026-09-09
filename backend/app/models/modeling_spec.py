@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Uuid, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -29,6 +29,7 @@ class ModelingSpec(Base):
     candidate_features: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     evaluation_metric: Mapped[str | None] = mapped_column(String, nullable=True)
     entity_id_column: Mapped[str | None] = mapped_column(String, nullable=True)
+    acknowledged_imbalance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     retrain_cadence: Mapped[str] = mapped_column(String, nullable=False, default="weekly")
     score_cadence: Mapped[str] = mapped_column(String, nullable=False, default="daily")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

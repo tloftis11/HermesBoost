@@ -20,8 +20,10 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier, XGBRegressor
 
+from app.services.ml.imbalance import is_imbalanced, minority_rate
 from app.services.ml.importance import extract_feature_importance
 from app.services.ml.metrics import compute_classification_metrics, compute_regression_metrics
 from app.services.ml.task_mapping import MlTask
@@ -66,6 +68,7 @@ class SplitData:
     y_train: np.ndarray
     y_test: np.ndarray
     label_classes: list[str] | None
+    imbalanced: bool = False
 
 
 def split_and_encode(data: TrainingDataResult, spec, ml_task: MlTask) -> SplitData:
@@ -74,6 +77,7 @@ def split_and_encode(data: TrainingDataResult, spec, ml_task: MlTask) -> SplitDa
     y_raw = df[spec.target]
 
     label_classes = None
+    imbalanced = False
     if ml_task == "classification":
         counts = y_raw.value_counts()
         too_small = counts[counts < 2]
@@ -82,6 +86,10 @@ def split_and_encode(data: TrainingDataResult, spec, ml_task: MlTask) -> SplitDa
                 f"Target class(es) with fewer than 2 examples: {too_small.index.tolist()} -- "
                 "cannot reliably train or evaluate on them."
             )
+        # Computed from the real training labels, not a profile estimate --
+        # always exact, and always applied when truly warranted regardless
+        # of whether the router's pre-flight courtesy check saw it coming.
+        imbalanced = is_imbalanced(minority_rate(counts.to_dict()))
         encoder = LabelEncoder()
         y = encoder.fit_transform(y_raw)
         label_classes = [str(c) for c in encoder.classes_]
@@ -92,7 +100,7 @@ def split_and_encode(data: TrainingDataResult, spec, ml_task: MlTask) -> SplitDa
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=stratify
     )
-    return SplitData(X_train, X_test, y_train, y_test, label_classes)
+    return SplitData(X_train, X_test, y_train, y_test, label_classes, imbalanced)
 
 
 def _estimator_list(ml_task: MlTask) -> list[str]:
@@ -126,20 +134,24 @@ def _json_safe(value):
     return value
 
 
-def _compute_metrics(estimator, ml_task: MlTask, X_test, y_test) -> dict:
+def _compute_metrics(estimator, ml_task: MlTask, X_test, y_test, imbalanced: bool = False) -> dict:
     if ml_task == "classification":
         y_prob = estimator.predict_proba(X_test)
         y_pred = y_prob.argmax(axis=1)
-        return compute_classification_metrics(y_test, y_pred, y_prob)
+        return compute_classification_metrics(y_test, y_pred, y_prob, class_weighted=imbalanced)
     y_pred = estimator.predict(X_test)
     return compute_regression_metrics(y_test, y_pred)
 
 
 def fit_flaml_candidate(
-    X_train, y_train, X_test, y_test, ml_task: MlTask, time_budget: int, output_feature_map: dict
+    X_train, y_train, X_test, y_test, ml_task: MlTask, time_budget: int, output_feature_map: dict,
+    imbalanced: bool = False,
 ) -> Candidate:
     start = time.monotonic()
     automl = AutoML()
+    fit_kwargs = {}
+    if imbalanced:
+        fit_kwargs["sample_weight"] = compute_sample_weight("balanced", y_train)
     with warnings.catch_warnings():
         # FLAML 2.6's lrl1 estimator uses a sklearn LogisticRegression
         # `penalty` kwarg deprecated in sklearn 1.9 -- noisy, not fatal.
@@ -154,6 +166,7 @@ def fit_flaml_candidate(
             estimator_list=_estimator_list(ml_task),
             seed=RANDOM_STATE,
             verbose=0,
+            **fit_kwargs,
         )
     elapsed = time.monotonic() - start
     estimator = automl.model.estimator
@@ -163,17 +176,21 @@ def fit_flaml_candidate(
         estimator=estimator,
         hyperparams=_json_safe(dict(automl.best_config)),
         train_time_seconds=elapsed,
-        metrics=_json_safe(_compute_metrics(estimator, ml_task, X_test, y_test)),
+        metrics=_json_safe(_compute_metrics(estimator, ml_task, X_test, y_test, imbalanced)),
         feature_importance=_json_safe(extract_feature_importance(estimator, output_feature_map)),
     )
 
 
 def fit_baseline_candidate(
-    name: str, factory, X_train, y_train, X_test, y_test, ml_task: MlTask, output_feature_map: dict
+    name: str, factory, X_train, y_train, X_test, y_test, ml_task: MlTask, output_feature_map: dict,
+    imbalanced: bool = False,
 ) -> Candidate:
     start = time.monotonic()
     estimator = factory()
-    estimator.fit(X_train, y_train)
+    fit_kwargs = {}
+    if imbalanced:
+        fit_kwargs["sample_weight"] = compute_sample_weight("balanced", y_train)
+    estimator.fit(X_train, y_train, **fit_kwargs)
     elapsed = time.monotonic() - start
     return Candidate(
         role="baseline",
@@ -181,17 +198,22 @@ def fit_baseline_candidate(
         estimator=estimator,
         hyperparams=_json_safe(estimator.get_params()),
         train_time_seconds=elapsed,
-        metrics=_json_safe(_compute_metrics(estimator, ml_task, X_test, y_test)),
+        metrics=_json_safe(_compute_metrics(estimator, ml_task, X_test, y_test, imbalanced)),
         feature_importance=_json_safe(extract_feature_importance(estimator, output_feature_map)),
     )
 
 
 def fit_all_candidates(
-    X_train, y_train, X_test, y_test, ml_task: MlTask, time_budget: int, output_feature_map: dict
+    X_train, y_train, X_test, y_test, ml_task: MlTask, time_budget: int, output_feature_map: dict,
+    imbalanced: bool = False,
 ) -> list[Candidate]:
-    recommended = fit_flaml_candidate(X_train, y_train, X_test, y_test, ml_task, time_budget, output_feature_map)
+    recommended = fit_flaml_candidate(
+        X_train, y_train, X_test, y_test, ml_task, time_budget, output_feature_map, imbalanced
+    )
     baselines = [
-        fit_baseline_candidate(name, factory, X_train, y_train, X_test, y_test, ml_task, output_feature_map)
+        fit_baseline_candidate(
+            name, factory, X_train, y_train, X_test, y_test, ml_task, output_feature_map, imbalanced
+        )
         for name, factory in BASELINE_ESTIMATORS[ml_task].items()
     ]
     # FLAML's pick is always its own leaderboard row, even if it lands on the

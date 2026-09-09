@@ -187,6 +187,7 @@ export function IntentChatPage() {
 
   const handlePatch = async (patch: {
     candidate_features?: string[];
+    acknowledge_imbalance?: boolean;
     retrain_cadence?: Cadence;
     score_cadence?: Cadence;
   }) => {

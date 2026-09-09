@@ -90,6 +90,13 @@ MODEL_INTERPRETATION_SYSTEM_PROMPT = (
     "- key_drivers: for each of the top few features (by importance), a "
     "short plain-language description of what it is and why it likely "
     "matters -- not just restating the number.\n"
+    "- If a candidate's metrics include class_weighted: true, explain "
+    "plainly that the target's rare positive class made the platform "
+    "apply class weighting during training, and call out the "
+    "threshold_at_max_f1 operating point (with its precision_at_max_f1 / "
+    "recall_at_max_f1) as the more informative read than the standard "
+    "precision/recall, which are computed at a fixed 0.5 threshold that "
+    "rare-event models often never cross.\n"
     "- Never invent a metric, feature, or algorithm not present in the "
     "data given to you."
 )

@@ -101,6 +101,101 @@ async def _get_candidates(db_session, model_run_id: str) -> list[ModelCandidate]
     return list(result.scalars().all())
 
 
+def _imbalanced_csv_bytes(n_majority: int = 82, n_minority: int = 14) -> bytes:
+    # ~14.6% positive rate -- below IMBALANCE_THRESHOLD (0.2).
+    rows = ["row_id,num_a,num_b,cat_c,label"]
+    for i in range(n_majority):
+        rows.append(f"{i},{i % 50},{(i * 3) % 40 - 20},north,0")
+    for i in range(n_minority):
+        j = n_majority + i
+        rows.append(f"{j},{j % 50},{(j * 3) % 40 - 20},south,1")
+    return ("\n".join(rows) + "\n").encode()
+
+
+@pytest_asyncio.fixture
+async def imbalanced_classification_spec(db_session, default_org_id, storage):
+    data = _imbalanced_csv_bytes()
+    storage.upload("datasets", f"{default_org_id}/imbalanced_sample.csv", data)
+    profile_dict = profile_csv_bytes(data)
+
+    dataset = Dataset(
+        organization_id=default_org_id,
+        name="imbalanced_sample.csv",
+        storage_path=f"{default_org_id}/imbalanced_sample.csv",
+        content_hash="imbalancedhash",
+        row_count=profile_dict["row_count"],
+        column_count=profile_dict["column_count"],
+        status="profiled",
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    db_session.add(
+        DatasetProfile(
+            organization_id=default_org_id,
+            dataset_id=dataset.id,
+            content_hash="imbalancedhash",
+            row_count=profile_dict["row_count"],
+            column_count=profile_dict["column_count"],
+            columns=profile_dict["columns"],
+        )
+    )
+    await db_session.commit()
+    await db_session.refresh(dataset)
+
+    spec = ModelingSpec(
+        organization_id=default_org_id,
+        dataset_id=dataset.id,
+        status="confirmed",
+        task_type="classification",
+        target="label",
+        candidate_features=["num_a", "num_b", "cat_c"],
+        evaluation_metric="auc",
+    )
+    db_session.add(spec)
+    await db_session.commit()
+    await db_session.refresh(spec)
+    return spec
+
+
+@pytest_asyncio.fixture
+async def imbalanced_model_run(db_session, default_org_id, imbalanced_classification_spec):
+    model = Model(
+        organization_id=default_org_id, modeling_spec_id=imbalanced_classification_spec.id, status="training"
+    )
+    db_session.add(model)
+    await db_session.flush()
+
+    run = ModelRun(organization_id=default_org_id, model_id=model.id, run_type="train", status="running")
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+    return run
+
+
+async def test_train_model_applies_class_weighting_for_rare_target(db_session, imbalanced_model_run, monkeypatch):
+    monkeypatch.setattr(settings, "FLAML_TIME_BUDGET_SECONDS", 3)
+    await _train_model_async(imbalanced_model_run.id)
+
+    candidates = await _get_candidates(db_session, imbalanced_model_run.id)
+    assert len(candidates) == 4
+    for candidate in candidates:
+        assert candidate.metrics["class_weighted"] is True
+        assert candidate.metrics["threshold_at_max_f1"] is not None
+
+
+async def test_train_model_no_class_weighting_for_balanced_target(db_session, model_run, monkeypatch):
+    # training_sample.csv's label column is 33/90 minority (~36.7%) -- above
+    # the imbalance threshold, so no weighting should be applied.
+    monkeypatch.setattr(settings, "FLAML_TIME_BUDGET_SECONDS", 3)
+    await _train_model_async(model_run.id)
+
+    candidates = await _get_candidates(db_session, model_run.id)
+    assert len(candidates) == 4
+    for candidate in candidates:
+        assert candidate.metrics["class_weighted"] is False
+
+
 async def test_train_model_completes_run_with_interpretation(db_session, model_run, monkeypatch):
     monkeypatch.setattr(settings, "FLAML_TIME_BUDGET_SECONDS", 3)
 

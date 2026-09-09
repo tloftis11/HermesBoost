@@ -67,6 +67,8 @@ export interface ModelingSpec {
   target: string | null;
   candidate_features: string[];
   evaluation_metric: string | null;
+  entity_id_column: string | null;
+  acknowledged_imbalance: boolean;
   retrain_cadence: Cadence;
   score_cadence: Cadence;
   created_at: string;
@@ -97,7 +99,7 @@ export interface ModelCandidate {
   role: CandidateRole;
   algorithm: string;
   ml_task: string;
-  metrics: Record<string, number>;
+  metrics: Record<string, number | boolean | null>;
   feature_importance: FeatureImportanceItem[] | null;
   hyperparams: Record<string, unknown> | null;
   // Decimal on the backend -- Pydantic v2 serializes Decimal as a JSON

@@ -55,6 +55,94 @@ async def confirmed_spec(db_session, default_org_id) -> ModelingSpec:
     return spec
 
 
+@pytest_asyncio.fixture
+async def imbalanced_spec(db_session, default_org_id) -> ModelingSpec:
+    dataset = Dataset(
+        organization_id=default_org_id,
+        name="rare_target.csv",
+        storage_path=f"{default_org_id}/x/rare_target.csv",
+        content_hash="rarehash",
+        row_count=100,
+        column_count=3,
+        status="profiled",
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    db_session.add(
+        DatasetProfile(
+            organization_id=default_org_id,
+            dataset_id=dataset.id,
+            content_hash="rarehash",
+            row_count=100,
+            column_count=3,
+            columns=[
+                {"name": "row_id", "dtype": "id"},
+                {"name": "amount", "dtype": "numeric"},
+                {
+                    "name": "had_event",
+                    "dtype": "categorical",
+                    "distinct_count": 2,
+                    "top_values": [{"value": "False", "count": 85}, {"value": "True", "count": 15}],
+                },
+            ],
+        )
+    )
+    spec = ModelingSpec(
+        organization_id=default_org_id,
+        dataset_id=dataset.id,
+        status="confirmed",
+        task_type="classification",
+        target="had_event",
+        candidate_features=["amount"],
+    )
+    db_session.add(spec)
+    await db_session.commit()
+    await db_session.refresh(spec)
+    return spec
+
+
+async def test_build_model_requires_imbalance_ack(client, imbalanced_spec):
+    resp = await client.post(f"/api/v1/modeling-specs/{imbalanced_spec.id}/build")
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["code"] == "imbalance_ack_required"
+    assert detail["minority_rate"] == 0.15
+
+
+async def test_build_model_proceeds_after_imbalance_ack(client, imbalanced_spec):
+    ack_resp = await client.patch(
+        f"/api/v1/modeling-specs/{imbalanced_spec.id}", json={"acknowledge_imbalance": True}
+    )
+    assert ack_resp.json()["acknowledged_imbalance"] is True
+
+    resp = await client.post(f"/api/v1/modeling-specs/{imbalanced_spec.id}/build")
+    assert resp.status_code == 202
+
+
+async def test_build_model_skips_imbalance_gate_when_distinct_count_exceeds_cap(
+    client, db_session, imbalanced_spec
+):
+    from sqlalchemy import select
+
+    # Simulate a target with more distinct classes than top_values (capped
+    # at 5) can reliably represent -- the pre-flight check can't be sure it
+    # saw the true rarest class, so it should skip the gate rather than guess.
+    result = await db_session.execute(
+        select(DatasetProfile).where(DatasetProfile.dataset_id == imbalanced_spec.dataset_id)
+    )
+    profile = result.scalar_one()
+    columns = profile.columns
+    for c in columns:
+        if c["name"] == "had_event":
+            c["distinct_count"] = 6
+    profile.columns = columns
+    await db_session.commit()
+
+    resp = await client.post(f"/api/v1/modeling-specs/{imbalanced_spec.id}/build")
+    assert resp.status_code == 202
+
+
 async def test_build_model_creates_training_row(client, confirmed_spec):
     resp = await client.post(f"/api/v1/modeling-specs/{confirmed_spec.id}/build")
     assert resp.status_code == 202

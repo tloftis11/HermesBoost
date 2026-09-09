@@ -173,6 +173,27 @@ async def test_chat_flow_persists_entity_id_column_from_carried_forward_spec(
     assert resp.json()["spec"]["entity_id_column"] == "row_id"
 
 
+async def test_patch_acknowledge_imbalance_sets_flag(client, profiled_dataset):
+    create_resp = await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")
+    spec_id = create_resp.json()["id"]
+    assert create_resp.json()["acknowledged_imbalance"] is False
+
+    resp = await client.patch(
+        f"/api/v1/modeling-specs/{spec_id}", json={"acknowledge_imbalance": True}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["acknowledged_imbalance"] is True
+
+
+async def test_patch_acknowledge_imbalance_false_is_a_noop(client, profiled_dataset):
+    create_resp = await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")
+    spec_id = create_resp.json()["id"]
+
+    await client.patch(f"/api/v1/modeling-specs/{spec_id}", json={"acknowledge_imbalance": True})
+    resp = await client.patch(f"/api/v1/modeling-specs/{spec_id}", json={"acknowledge_imbalance": False})
+    assert resp.json()["acknowledged_imbalance"] is True  # cannot be un-acknowledged via False
+
+
 async def test_unknown_modeling_spec_404s(client):
     resp = await client.get(f"/api/v1/modeling-specs/{uuid.uuid4()}")
     assert resp.status_code == 404

@@ -88,6 +88,7 @@ async def _run(model_run_id: str) -> None:
             candidates = fit_all_candidates(
                 Xt_train, split.y_train, Xt_test, split.y_test,
                 ml_task, settings.FLAML_TIME_BUDGET_SECONDS, output_feature_map,
+                imbalanced=split.imbalanced,
             )
 
             storage = get_storage_backend()

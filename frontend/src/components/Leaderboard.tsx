@@ -19,8 +19,8 @@ export function formatAlgorithm(algorithm: string): string {
   return ALGORITHM_LABEL[algorithm] ?? algorithm;
 }
 
-function formatMetric(value: number | undefined): string {
-  return value === undefined ? "--" : value.toFixed(2);
+function formatMetric(value: number | boolean | null | undefined): string {
+  return typeof value === "number" ? value.toFixed(2) : "--";
 }
 
 interface LeaderboardProps {
@@ -48,6 +48,7 @@ export function Leaderboard({ candidates, activeCandidateId, onPromote, promotin
                 <th>Precision</th>
                 <th>Recall</th>
                 <th>Calibration err.</th>
+                <th>Best-F1 threshold (P/R)</th>
               </>
             ) : (
               <>
@@ -66,13 +67,25 @@ export function Leaderboard({ candidates, activeCandidateId, onPromote, promotin
             return (
               <tr key={c.id} className={isActive ? "highlight" : undefined}>
                 <td className="mono">{c.role === "recommended" ? "Recommended" : "Baseline"}</td>
-                <td>{formatAlgorithm(c.algorithm)}</td>
+                <td>
+                  {formatAlgorithm(c.algorithm)}
+                  {c.metrics.class_weighted === true && (
+                    <span className="pill" style={{ marginLeft: 6 }} title="Class weighting applied -- rare positive class">
+                      weighted
+                    </span>
+                  )}
+                </td>
                 {isClassification ? (
                   <>
                     <td className="mono">{formatMetric(c.metrics.auc)}</td>
                     <td className="mono">{formatMetric(c.metrics.precision)}</td>
                     <td className="mono">{formatMetric(c.metrics.recall)}</td>
                     <td className="mono">{formatMetric(c.metrics.calibration_error)}</td>
+                    <td className="mono">
+                      {typeof c.metrics.threshold_at_max_f1 === "number"
+                        ? `${c.metrics.threshold_at_max_f1.toFixed(2)} (${formatMetric(c.metrics.precision_at_max_f1)}/${formatMetric(c.metrics.recall_at_max_f1)})`
+                        : "--"}
+                    </td>
                   </>
                 ) : (
                   <>

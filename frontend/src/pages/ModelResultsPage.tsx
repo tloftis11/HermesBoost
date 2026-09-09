@@ -215,7 +215,7 @@ function GuidedView({
 
       <div className="stat-row">
         <div className="stat-tile">
-          <span className="num mono">{primaryMetricValue !== undefined ? primaryMetricValue.toFixed(2) : "--"}</span>
+          <span className="num mono">{typeof primaryMetricValue === "number" ? primaryMetricValue.toFixed(2) : "--"}</span>
           <span className="label">{primaryMetricLabel}</span>
         </div>
         <div className="stat-tile">

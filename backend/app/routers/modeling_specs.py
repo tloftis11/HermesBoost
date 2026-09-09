@@ -146,6 +146,8 @@ async def update_modeling_spec(
         spec.candidate_features = body.candidate_features
     if body.entity_id_column is not None:
         spec.entity_id_column = body.entity_id_column
+    if body.acknowledge_imbalance:
+        spec.acknowledged_imbalance = True
     if body.retrain_cadence is not None:
         spec.retrain_cadence = body.retrain_cadence
     if body.score_cadence is not None:

@@ -1,12 +1,32 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ApiError } from "../api/client";
 import { buildModel } from "../api/models";
 import type { Cadence, ColumnProfile, Dataset, DatasetProfile, JoinDataset, JoinType, ModelingSpec } from "../types";
+
+interface ImbalanceAckDetail {
+  code: "imbalance_ack_required";
+  minority_rate: number;
+  message: string;
+}
+
+function isImbalanceAckDetail(detail: unknown): detail is ImbalanceAckDetail {
+  return (
+    typeof detail === "object" &&
+    detail !== null &&
+    (detail as Record<string, unknown>).code === "imbalance_ack_required"
+  );
+}
 
 interface SpecCardProps {
   spec: ModelingSpec;
   availableColumns: ColumnProfile[];
-  onPatch: (patch: { candidate_features?: string[]; retrain_cadence?: Cadence; score_cadence?: Cadence }) => void;
+  onPatch: (patch: {
+    candidate_features?: string[];
+    acknowledge_imbalance?: boolean;
+    retrain_cadence?: Cadence;
+    score_cadence?: Cadence;
+  }) => Promise<void>;
   disabled: boolean;
   baseDatasetName: string;
   baseColumns: ColumnProfile[];
@@ -44,6 +64,7 @@ export function SpecCard({
   const navigate = useNavigate();
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
+  const [imbalanceNotice, setImbalanceNotice] = useState<ImbalanceAckDetail | null>(null);
   const addableColumns = availableColumns.filter((c) => !spec.candidate_features.includes(c.name));
 
   const [attachDatasetId, setAttachDatasetId] = useState("");
@@ -58,8 +79,26 @@ export function SpecCard({
 
   const handleBuild = async () => {
     setBuildError(null);
+    setImbalanceNotice(null);
     setBuilding(true);
     try {
+      const { model_id } = await buildModel(spec.id);
+      navigate(`/models/${model_id}`);
+    } catch (err) {
+      if (err instanceof ApiError && isImbalanceAckDetail(err.detail)) {
+        setImbalanceNotice(err.detail);
+      } else {
+        setBuildError(err instanceof Error ? err.message : "Could not start training");
+      }
+      setBuilding(false);
+    }
+  };
+
+  const handleAcknowledgeImbalanceAndBuild = async () => {
+    setImbalanceNotice(null);
+    setBuilding(true);
+    try {
+      await onPatch({ acknowledge_imbalance: true });
       const { model_id } = await buildModel(spec.id);
       navigate(`/models/${model_id}`);
     } catch (err) {
@@ -318,6 +357,29 @@ export function SpecCard({
           <p className="spec-caption" style={{ color: "var(--bad)" }}>
             {buildError}
           </p>
+        )}
+        {imbalanceNotice && (
+          <div
+            className="card"
+            style={{ marginTop: 4, background: "var(--accent-soft)", borderColor: "var(--accent)" }}
+          >
+            <p className="spec-caption" style={{ color: "var(--ink)" }}>
+              {imbalanceNotice.message}
+            </p>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={building}
+                onClick={handleAcknowledgeImbalanceAndBuild}
+              >
+                {building ? "Starting…" : "Proceed with class weighting"}
+              </button>
+              <button type="button" className="btn ghost" onClick={() => setImbalanceNotice(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
         <p className="spec-caption">
           HermesBoost proposes this from your description -- you're always in control before anything runs.

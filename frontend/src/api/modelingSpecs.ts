@@ -24,7 +24,13 @@ export async function sendChatMessage(
 
 export async function updateModelingSpec(
   specId: string,
-  patch: { candidate_features?: string[]; retrain_cadence?: Cadence; score_cadence?: Cadence },
+  patch: {
+    candidate_features?: string[];
+    entity_id_column?: string;
+    acknowledge_imbalance?: boolean;
+    retrain_cadence?: Cadence;
+    score_cadence?: Cadence;
+  },
 ): Promise<ModelingSpec> {
   return request<ModelingSpec>(`/api/v1/modeling-specs/${specId}`, {
     method: "PATCH",
