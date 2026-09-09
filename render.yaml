@@ -33,7 +33,11 @@ services:
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    # concurrency=1 -- each worker process independently loads FLAML/XGBoost/
+    # LightGBM/scikit-learn/pandas/numpy, so 2 processes doubled the resident
+    # memory before any task-specific data; that was OOM-killing the worker
+    # mid-run (memory+CPU spikes at the exact moment logs went silent).
+    startCommand: celery -A app.celery_app worker --loglevel=info --concurrency=1
     envVars:
       - key: DATABASE_URL
         sync: false
