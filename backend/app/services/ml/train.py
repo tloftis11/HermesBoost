@@ -8,6 +8,7 @@ is simpler, more testable, and gives exactly the ~4-row leaderboard the
 mockup wants.
 """
 
+import math
 import time
 import warnings
 from dataclasses import dataclass
@@ -107,13 +108,17 @@ def _flaml_metric_for(ml_task: MlTask) -> str:
 def _json_safe(value):
     """Coerces numpy scalar types (which FLAML's best_config and sklearn's
     get_params() can return) into plain Python types so the result can be
-    stored directly as JSONB."""
+    stored directly as JSONB. Also maps NaN/Infinity to None -- XGBoost's
+    sklearn wrapper defaults `missing` to np.nan, and Python's json.dumps
+    happily emits the literal (non-JSON-spec) token `NaN`, which Postgres's
+    JSONB column correctly rejects."""
     if isinstance(value, dict):
         return {k: _json_safe(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(v) for v in value]
-    if isinstance(value, np.floating):
-        return float(value)
+    if isinstance(value, (np.floating, float)):
+        f = float(value)
+        return None if math.isnan(f) or math.isinf(f) else f
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.bool_):
@@ -158,8 +163,8 @@ def fit_flaml_candidate(
         estimator=estimator,
         hyperparams=_json_safe(dict(automl.best_config)),
         train_time_seconds=elapsed,
-        metrics=_compute_metrics(estimator, ml_task, X_test, y_test),
-        feature_importance=extract_feature_importance(estimator, output_feature_map),
+        metrics=_json_safe(_compute_metrics(estimator, ml_task, X_test, y_test)),
+        feature_importance=_json_safe(extract_feature_importance(estimator, output_feature_map)),
     )
 
 
@@ -176,8 +181,8 @@ def fit_baseline_candidate(
         estimator=estimator,
         hyperparams=_json_safe(estimator.get_params()),
         train_time_seconds=elapsed,
-        metrics=_compute_metrics(estimator, ml_task, X_test, y_test),
-        feature_importance=extract_feature_importance(estimator, output_feature_map),
+        metrics=_json_safe(_compute_metrics(estimator, ml_task, X_test, y_test)),
+        feature_importance=_json_safe(extract_feature_importance(estimator, output_feature_map)),
     )
 
 
