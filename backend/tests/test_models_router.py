@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from decimal import Decimal
 
 import pytest_asyncio
@@ -9,6 +10,7 @@ from app.models.model import Model
 from app.models.model_candidate import ModelCandidate
 from app.models.model_run import ModelRun
 from app.models.modeling_spec import ModelingSpec
+from app.models.scheduled_score import ScheduledScore
 
 
 @pytest_asyncio.fixture
@@ -217,3 +219,96 @@ async def test_list_models_reflects_retrain_in_progress(client, confirmed_spec, 
     assert items[0]["id"] == completed_model_with_leaderboard.id
     assert items[0]["status"] == "training"
     assert items[0]["algorithm"] == "flaml_lgbm"  # stale-but-valid, unchanged until the new run completes
+
+
+async def test_score_model_requires_ready_status(client, confirmed_spec):
+    build_resp = await client.post(f"/api/v1/modeling-specs/{confirmed_spec.id}/build")
+    model_id = build_resp.json()["model_id"]
+
+    resp = await client.post(f"/api/v1/models/{model_id}/score")
+    assert resp.status_code == 400
+
+
+async def test_score_model_creates_score_run(client, completed_model_with_leaderboard):
+    resp = await client.post(f"/api/v1/models/{completed_model_with_leaderboard.id}/score")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert uuid.UUID(body["model_run_id"])
+
+    scores_resp = await client.get(f"/api/v1/models/{completed_model_with_leaderboard.id}/scores")
+    assert scores_resp.status_code == 200
+    scores = scores_resp.json()
+    assert scores["run"]["id"] == body["model_run_id"]
+    assert scores["run"]["status"] == "running"  # score_model.delay is stubbed to a no-op in tests
+    assert scores["rows"] == []
+
+
+async def test_get_scores_empty_before_any_score_run(client, completed_model_with_leaderboard):
+    resp = await client.get(f"/api/v1/models/{completed_model_with_leaderboard.id}/scores")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run"] is None
+    assert body["rows"] == []
+
+
+async def test_get_scores_returns_rows_from_latest_run(
+    client, db_session, default_org_id, completed_model_with_leaderboard
+):
+    model = completed_model_with_leaderboard
+    run = ModelRun(
+        organization_id=default_org_id, model_id=model.id, run_type="score",
+        status="completed", row_count_used=2,
+    )
+    db_session.add(run)
+    await db_session.flush()
+    db_session.add_all([
+        ScheduledScore(
+            organization_id=default_org_id, model_id=model.id, model_run_id=run.id,
+            model_candidate_id=model.active_candidate_id, entity_id="1",
+            score_date=date.today(), predicted_label="A", predicted_probability=0.9,
+        ),
+        ScheduledScore(
+            organization_id=default_org_id, model_id=model.id, model_run_id=run.id,
+            model_candidate_id=model.active_candidate_id, entity_id="2",
+            score_date=date.today(), predicted_label="B", predicted_probability=0.6,
+        ),
+    ])
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/models/{model.id}/scores")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_row_count"] == 2
+    assert len(body["rows"]) == 2
+    assert {r["entity_id"] for r in body["rows"]} == {"1", "2"}
+
+
+async def test_promote_candidate_switches_active(client, db_session, completed_model_with_leaderboard):
+    from sqlalchemy import select
+
+    model = completed_model_with_leaderboard
+    result = await db_session.execute(
+        select(ModelCandidate).where(
+            ModelCandidate.model_run_id.in_(
+                select(ModelRun.id).where(ModelRun.model_id == model.id)
+            ),
+            ModelCandidate.role == "baseline",
+        )
+    )
+    baseline = result.scalars().first()
+    assert baseline.id != model.active_candidate_id
+
+    resp = await client.post(f"/api/v1/models/{model.id}/promote", json={"candidate_id": baseline.id})
+    assert resp.status_code == 200
+    assert resp.json()["active_candidate"]["id"] == baseline.id
+
+    get_resp = await client.get(f"/api/v1/models/{model.id}")
+    assert get_resp.json()["active_candidate"]["id"] == baseline.id
+
+
+async def test_promote_candidate_rejects_foreign_candidate(client, completed_model_with_leaderboard, confirmed_spec):
+    resp = await client.post(
+        f"/api/v1/models/{completed_model_with_leaderboard.id}/promote",
+        json={"candidate_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 404

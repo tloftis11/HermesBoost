@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel
@@ -74,3 +74,35 @@ class ModelListItemOut(BaseModel):
     primary_metric_label: str | None = None
     primary_metric_value: float | None = None
     updated_at: datetime
+
+
+class ScoreResponse(BaseModel):
+    model_id: str
+    model_run_id: str
+
+
+class ScoredRowOut(BaseModel):
+    id: str
+    entity_id: str
+    score_date: date
+    predicted_value: float | None = None
+    predicted_label: str | None = None
+    predicted_probability: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ScoreRunOut(BaseModel):
+    """Advanced-view shape for the Scores tab: run metadata plus the rows
+    it produced, capped at a sane count for a first version."""
+
+    id: str
+    modeling_spec_id: str
+    status: str
+    run: ModelRunOut | None = None
+    rows: list[ScoredRowOut] = []
+    total_row_count: int | None = None
+
+
+class PromoteCandidateRequest(BaseModel):
+    candidate_id: str

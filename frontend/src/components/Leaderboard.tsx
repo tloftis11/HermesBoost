@@ -25,9 +25,12 @@ function formatMetric(value: number | undefined): string {
 
 interface LeaderboardProps {
   candidates: ModelCandidate[];
+  activeCandidateId?: string | null;
+  onPromote?: (candidateId: string) => void;
+  promoting?: string | null;
 }
 
-export function Leaderboard({ candidates }: LeaderboardProps) {
+export function Leaderboard({ candidates, activeCandidateId, onPromote, promoting }: LeaderboardProps) {
   const mlTask = candidates[0]?.ml_task;
   const isClassification = mlTask === "classification";
 
@@ -54,30 +57,50 @@ export function Leaderboard({ candidates }: LeaderboardProps) {
               </>
             )}
             <th>Train time</th>
+            {onPromote && <th></th>}
           </tr>
         </thead>
         <tbody>
-          {candidates.map((c) => (
-            <tr key={c.id} className={c.role === "recommended" ? "highlight" : undefined}>
-              <td className="mono">{c.role === "recommended" ? "Recommended" : "Baseline"}</td>
-              <td>{formatAlgorithm(c.algorithm)}</td>
-              {isClassification ? (
-                <>
-                  <td className="mono">{formatMetric(c.metrics.auc)}</td>
-                  <td className="mono">{formatMetric(c.metrics.precision)}</td>
-                  <td className="mono">{formatMetric(c.metrics.recall)}</td>
-                  <td className="mono">{formatMetric(c.metrics.calibration_error)}</td>
-                </>
-              ) : (
-                <>
-                  <td className="mono">{formatMetric(c.metrics.r2)}</td>
-                  <td className="mono">{formatMetric(c.metrics.rmse)}</td>
-                  <td className="mono">{formatMetric(c.metrics.mae)}</td>
-                </>
-              )}
-              <td className="mono">{c.train_time_seconds === null ? "--" : `${Number(c.train_time_seconds).toFixed(1)}s`}</td>
-            </tr>
-          ))}
+          {candidates.map((c) => {
+            const isActive = activeCandidateId ? c.id === activeCandidateId : c.role === "recommended";
+            return (
+              <tr key={c.id} className={isActive ? "highlight" : undefined}>
+                <td className="mono">{c.role === "recommended" ? "Recommended" : "Baseline"}</td>
+                <td>{formatAlgorithm(c.algorithm)}</td>
+                {isClassification ? (
+                  <>
+                    <td className="mono">{formatMetric(c.metrics.auc)}</td>
+                    <td className="mono">{formatMetric(c.metrics.precision)}</td>
+                    <td className="mono">{formatMetric(c.metrics.recall)}</td>
+                    <td className="mono">{formatMetric(c.metrics.calibration_error)}</td>
+                  </>
+                ) : (
+                  <>
+                    <td className="mono">{formatMetric(c.metrics.r2)}</td>
+                    <td className="mono">{formatMetric(c.metrics.rmse)}</td>
+                    <td className="mono">{formatMetric(c.metrics.mae)}</td>
+                  </>
+                )}
+                <td className="mono">{c.train_time_seconds === null ? "--" : `${Number(c.train_time_seconds).toFixed(1)}s`}</td>
+                {onPromote && (
+                  <td>
+                    {isActive ? (
+                      <span className="pill good">Active</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        disabled={promoting === c.id}
+                        onClick={() => onPromote(c.id)}
+                      >
+                        {promoting === c.id ? "Promoting…" : "Promote"}
+                      </button>
+                    )}
+                  </td>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

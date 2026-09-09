@@ -56,6 +56,27 @@ services:
       - key: CELERY_TASK_ALWAYS_EAGER
         value: "false"
 
+  - type: cron
+    name: hermesboost-scheduler
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Hourly is plenty for daily/weekly/monthly cadences. Enqueues onto the
+    # existing worker via the same Celery/Redis broker -- this job's own
+    # runtime is seconds (just the DB check + .delay() calls), not the
+    # duration of the training/scoring work itself.
+    schedule: "0 * * * *"
+    startCommand: python -m scripts.dispatch_scheduled_runs
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "false"
+
   - type: web
     name: hermesboost-frontend
     runtime: static

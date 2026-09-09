@@ -6,8 +6,9 @@ scale -- just `.sql` files and a steady hand.
 Current files: `0001_init.sql` (organizations, datasets, dataset_profiles,
 llm_task_model_config, llm_usage_log), `0002_intent_chat.sql`
 (modeling_specs, chat_messages), `0003_models.sql` (models, model_runs,
-model_candidates, modeling_spec_join_datasets, dataset_series). Apply all
-three, in order, on a fresh database.
+model_candidates, modeling_spec_join_datasets, dataset_series),
+`0004_scoring.sql` (scheduled_scores). Apply all four, in order, on a
+fresh database.
 
 ## Applying against Supabase
 
@@ -18,11 +19,13 @@ run them with `psql` against the project's connection string:
 psql "$DATABASE_URL" -f migrations/0001_init.sql
 psql "$DATABASE_URL" -f migrations/0002_intent_chat.sql
 psql "$DATABASE_URL" -f migrations/0003_models.sql
+psql "$DATABASE_URL" -f migrations/0004_scoring.sql
 ```
 
 `0003_models.sql` also needs a new Supabase Storage bucket created manually
 (Storage -> New bucket -> `models`, private) before any real training run —
-same one-time step `datasets` needed in milestone 1.
+same one-time step `datasets` needed in milestone 1. `0004_scoring.sql`
+needs no new bucket — scoring only reads the existing `models` bucket.
 
 ## Validating locally first
 

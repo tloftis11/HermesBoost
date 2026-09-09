@@ -10,6 +10,7 @@ from app.models.model import Model
 from app.models.model_candidate import ModelCandidate
 from app.models.model_run import ModelRun
 from app.models.modeling_spec import ModelingSpec
+from app.models.scheduled_score import ScheduledScore
 from app.routers.modeling_specs import _get_org_spec
 from app.schemas.model import (
     BuildResponse,
@@ -18,9 +19,16 @@ from app.schemas.model import (
     ModelGuidedOut,
     ModelListItemOut,
     ModelRunOut,
+    PromoteCandidateRequest,
+    ScoredRowOut,
+    ScoreResponse,
+    ScoreRunOut,
 )
 from app.services.ml.task_mapping import UnsupportedTaskTypeError, to_ml_task
+from app.tasks.score_model import score_model
 from app.tasks.train_model import train_model
+
+MAX_SCORE_ROWS = 500
 
 router = APIRouter(tags=["models"])
 
@@ -144,6 +152,66 @@ async def get_leaderboard(model_id: str, organization_id: CurrentOrgId, db: DbSe
     )
 
 
+@router.post("/models/{model_id}/score", response_model=ScoreResponse, status_code=202)
+async def score_model_endpoint(model_id: str, organization_id: CurrentOrgId, db: DbSession) -> ScoreResponse:
+    model = await _get_org_model(db, model_id, organization_id)
+    if model.status != "ready":
+        raise HTTPException(status_code=400, detail="Model must be ready before it can be scored.")
+
+    run = ModelRun(organization_id=organization_id, model_id=model.id, run_type="score", status="running")
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+
+    await asyncio.to_thread(score_model.delay, run.id)
+
+    return ScoreResponse(model_id=model.id, model_run_id=run.id)
+
+
+@router.get("/models/{model_id}/scores", response_model=ScoreRunOut)
+async def get_scores(model_id: str, organization_id: CurrentOrgId, db: DbSession) -> ScoreRunOut:
+    model = await _get_org_model(db, model_id, organization_id)
+    latest_run = await _get_latest_run(db, model.id, run_type="score")
+
+    rows: list[ScheduledScore] = []
+    if latest_run is not None:
+        result = await db.execute(
+            select(ScheduledScore)
+            .where(ScheduledScore.model_run_id == latest_run.id)
+            .order_by(ScheduledScore.entity_id)
+            .limit(MAX_SCORE_ROWS)
+        )
+        rows = list(result.scalars().all())
+
+    return ScoreRunOut(
+        id=model.id,
+        modeling_spec_id=model.modeling_spec_id,
+        status=model.status,
+        run=ModelRunOut.model_validate(latest_run) if latest_run else None,
+        rows=[ScoredRowOut.model_validate(r) for r in rows],
+        total_row_count=latest_run.row_count_used if latest_run else None,
+    )
+
+
+@router.post("/models/{model_id}/promote", response_model=ModelGuidedOut)
+async def promote_candidate(
+    model_id: str, body: PromoteCandidateRequest, organization_id: CurrentOrgId, db: DbSession
+) -> ModelGuidedOut:
+    model = await _get_org_model(db, model_id, organization_id)
+
+    candidate = await db.get(ModelCandidate, body.candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    run = await db.get(ModelRun, candidate.model_run_id)
+    if run is None or str(run.model_id) != str(model.id):
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    model.active_candidate_id = candidate.id
+    await db.commit()
+
+    return await get_model(model.id, organization_id, db)
+
+
 @router.get("/modeling-specs/{spec_id}/models", response_model=ModelGuidedOut)
 async def get_model_for_spec(spec_id: str, organization_id: CurrentOrgId, db: DbSession) -> ModelGuidedOut:
     await _get_org_spec(db, spec_id, organization_id)  # 404s if not this org's
@@ -168,8 +236,10 @@ async def _get_org_model(db: DbSession, model_id: str, organization_id: str) -> 
     return model
 
 
-async def _get_latest_run(db: DbSession, model_id: str) -> ModelRun | None:
+async def _get_latest_run(db: DbSession, model_id: str, run_type: str = "train") -> ModelRun | None:
     result = await db.execute(
-        select(ModelRun).where(ModelRun.model_id == model_id).order_by(ModelRun.started_at.desc())
+        select(ModelRun)
+        .where(ModelRun.model_id == model_id, ModelRun.run_type == run_type)
+        .order_by(ModelRun.started_at.desc())
     )
     return result.scalars().first()

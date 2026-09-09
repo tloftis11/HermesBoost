@@ -7,6 +7,14 @@ export interface Dataset {
   row_count: number | null;
   column_count: number | null;
   error_message: string | null;
+  series_id: string | null;
+  as_of_date: string | null;
+  created_at: string;
+}
+
+export interface DatasetSeries {
+  id: string;
+  name: string;
   created_at: string;
 }
 
@@ -159,4 +167,27 @@ export interface JoinDataset {
   dataset_name: string;
   join_key_column: string;
   join_type: JoinType;
+}
+
+export interface ScoreResponse {
+  model_id: string;
+  model_run_id: string;
+}
+
+export interface ScoredRow {
+  id: string;
+  entity_id: string;
+  score_date: string;
+  predicted_value: number | null;
+  predicted_label: string | null;
+  predicted_probability: number | null;
+}
+
+export interface ScoreRun {
+  id: string;
+  modeling_spec_id: string;
+  status: ModelStatus;
+  run: ModelRun | null;
+  rows: ScoredRow[];
+  total_row_count: number | null;
 }

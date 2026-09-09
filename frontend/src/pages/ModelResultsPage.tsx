@@ -1,16 +1,43 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getLeaderboard } from "../api/models";
+import { getLeaderboard, getScores, promoteCandidate, scoreModel } from "../api/models";
 import { getModelingSpec } from "../api/modelingSpecs";
 import { HyperparamsPanel } from "../components/HyperparamsPanel";
 import { KeyDriversList } from "../components/KeyDriversList";
 import { Leaderboard, formatAlgorithm } from "../components/Leaderboard";
 import { RunMetadataFooter } from "../components/RunMetadataFooter";
+import { ScoreResultsTable } from "../components/ScoreResultsTable";
 import { Sidebar } from "../components/Sidebar";
 import { useModelRun } from "../hooks/useModelRun";
-import type { Leaderboard as LeaderboardData, ModelGuided, ModelingSpec } from "../types";
+import type { Leaderboard as LeaderboardData, ModelGuided, ModelingSpec, ScoreRun } from "../types";
 
-type ViewMode = "guided" | "advanced";
+type ViewMode = "guided" | "advanced" | "scores";
+
+const SCORE_POLL_INTERVAL_MS = 2000;
+
+function exportLeaderboardCsv(leaderboard: LeaderboardData, modelId: string) {
+  const headers = ["role", "algorithm", "metrics", "hyperparams", "train_time_seconds"];
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const lines = [headers.join(",")];
+  for (const c of leaderboard.candidates) {
+    lines.push(
+      [
+        escape(c.role),
+        escape(formatAlgorithm(c.algorithm)),
+        escape(JSON.stringify(c.metrics)),
+        escape(JSON.stringify(c.hyperparams ?? {})),
+        escape(c.train_time_seconds ?? ""),
+      ].join(","),
+    );
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `leaderboard-${modelId}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function ModelResultsPage() {
   const { modelId } = useParams<{ modelId: string }>();
@@ -20,6 +47,8 @@ export function ModelResultsPage() {
   const [view, setView] = useState<ViewMode>("guided");
   const [leaderboard, setLeaderboard] = useState<LeaderboardData | null>(null);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState<string | null>(null);
 
   useEffect(() => {
     if (!model) return;
@@ -29,11 +58,28 @@ export function ModelResultsPage() {
   }, [model?.modeling_spec_id]);
 
   useEffect(() => {
+    setActiveCandidateId(model?.active_candidate?.id ?? null);
+  }, [model?.active_candidate?.id]);
+
+  useEffect(() => {
     if (!modelId || !model || model.status === "training") return;
     getLeaderboard(modelId)
       .then(setLeaderboard)
       .catch((err) => setLeaderboardError(err instanceof Error ? err.message : "Could not load leaderboard"));
   }, [modelId, model?.status]);
+
+  const handlePromote = async (candidateId: string) => {
+    if (!modelId) return;
+    setPromoting(candidateId);
+    try {
+      await promoteCandidate(modelId, candidateId);
+      setActiveCandidateId(candidateId);
+    } catch {
+      // leave the active candidate as-is on failure
+    } finally {
+      setPromoting(null);
+    }
+  };
 
   const breadcrumbLabel = spec?.task_description || "Model results";
 
@@ -62,7 +108,22 @@ export function ModelResultsPage() {
                 >
                   Advanced
                 </button>
+                <button
+                  type="button"
+                  className={`seg-btn${view === "scores" ? " active" : ""}`}
+                  onClick={() => setView("scores")}
+                >
+                  Scores
+                </button>
               </div>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={!leaderboard}
+                onClick={() => modelId && leaderboard && exportLeaderboardCsv(leaderboard, modelId)}
+              >
+                Export
+              </button>
             </div>
           )}
         </div>
@@ -89,8 +150,16 @@ export function ModelResultsPage() {
             </div>
           ) : view === "guided" ? (
             <GuidedView model={model} onSeeFullMetrics={() => setView("advanced")} />
+          ) : view === "advanced" ? (
+            <AdvancedView
+              leaderboard={leaderboard}
+              leaderboardError={leaderboardError}
+              activeCandidateId={activeCandidateId}
+              onPromote={handlePromote}
+              promoting={promoting}
+            />
           ) : (
-            <AdvancedView leaderboard={leaderboard} leaderboardError={leaderboardError} />
+            <ScoresView modelId={modelId!} />
           )}
         </div>
       </div>
@@ -168,9 +237,15 @@ function GuidedView({
 function AdvancedView({
   leaderboard,
   leaderboardError,
+  activeCandidateId,
+  onPromote,
+  promoting,
 }: {
   leaderboard: LeaderboardData | null;
   leaderboardError: string | null;
+  activeCandidateId: string | null;
+  onPromote: (candidateId: string) => void;
+  promoting: string | null;
 }) {
   if (leaderboardError) {
     return (
@@ -183,13 +258,21 @@ function AdvancedView({
     return <div className="empty-state">Loading leaderboard…</div>;
   }
 
-  const recommended = leaderboard.candidates.find((c) => c.role === "recommended") ?? leaderboard.candidates[0];
-  const importance = recommended?.feature_importance ?? [];
+  const active =
+    leaderboard.candidates.find((c) => c.id === activeCandidateId) ??
+    leaderboard.candidates.find((c) => c.role === "recommended") ??
+    leaderboard.candidates[0];
+  const importance = active?.feature_importance ?? [];
   const maxImportance = Math.max(...importance.map((f) => f.importance), 0.0001);
 
   return (
     <>
-      <Leaderboard candidates={leaderboard.candidates} />
+      <Leaderboard
+        candidates={leaderboard.candidates}
+        activeCandidateId={activeCandidateId}
+        onPromote={onPromote}
+        promoting={promoting}
+      />
 
       <div className="two-col">
         <div className="card">
@@ -204,12 +287,119 @@ function AdvancedView({
             </div>
           ))}
         </div>
-        {recommended && (
-          <HyperparamsPanel algorithmLabel={formatAlgorithm(recommended.algorithm)} hyperparams={recommended.hyperparams} />
+        {active && (
+          <HyperparamsPanel algorithmLabel={formatAlgorithm(active.algorithm)} hyperparams={active.hyperparams} />
         )}
       </div>
 
       {leaderboard.run && <RunMetadataFooter run={leaderboard.run} />}
+    </>
+  );
+}
+
+function ScoresView({ modelId }: { modelId: string }) {
+  const [scoreRun, setScoreRun] = useState<ScoreRun | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<number | null>(null);
+
+  const fetchScores = useCallback(async () => {
+    try {
+      const data = await getScores(modelId);
+      setScoreRun(data);
+      if (data.run?.status !== "running" && pollRef.current !== null) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    } catch {
+      // leave prior state on a transient fetch failure
+    } finally {
+      setLoading(false);
+    }
+  }, [modelId]);
+
+  useEffect(() => {
+    fetchScores();
+    return () => {
+      if (pollRef.current !== null) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [fetchScores]);
+
+  const handleScoreNow = async () => {
+    setError(null);
+    setStarting(true);
+    try {
+      await scoreModel(modelId);
+      await fetchScores();
+      if (pollRef.current === null) {
+        pollRef.current = window.setInterval(fetchScores, SCORE_POLL_INTERVAL_MS);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start scoring");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="empty-state">Loading scores…</div>;
+  }
+
+  const run = scoreRun?.run ?? null;
+  const isRunning = starting || run?.status === "running";
+
+  return (
+    <>
+      <div className="status-row">
+        {run && (
+          <span className={`pill ${run.status === "completed" ? "good" : run.status === "error" ? "bad" : "warn"}`}>
+            {run.status}
+          </span>
+        )}
+        {run?.completed_at && <span>Last scored {new Date(run.completed_at).toLocaleString()}</span>}
+        <button type="button" className="btn primary" disabled={isRunning} onClick={handleScoreNow}>
+          {isRunning ? "Scoring…" : "Score now"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="card" style={{ borderColor: "var(--bad)", color: "var(--bad)" }}>
+          {error}
+        </div>
+      )}
+      {run?.status === "error" && (
+        <div className="card" style={{ borderColor: "var(--bad)", color: "var(--bad)" }}>
+          {run.error_message ?? "Scoring failed."}
+        </div>
+      )}
+      {run?.warnings && run.warnings.length > 0 && (
+        <div className="run-warnings">
+          {run.warnings.map((w, i) => (
+            <span className="pill warn" key={i}>
+              {w}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {!run ? (
+        <div className="empty-state">
+          No scores yet -- click "Score now" to run this model against the latest data.
+        </div>
+      ) : (
+        <>
+          {scoreRun && scoreRun.rows.length > 0 && (
+            <p className="spec-caption">
+              Showing {scoreRun.rows.length} of {scoreRun.total_row_count ?? scoreRun.rows.length} rows.
+            </p>
+          )}
+          <ScoreResultsTable rows={scoreRun?.rows ?? []} />
+        </>
+      )}
     </>
   );
 }

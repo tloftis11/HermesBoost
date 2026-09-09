@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dataset import Dataset
+from app.models.dataset_profile import DatasetProfile
 from app.models.modeling_spec import ModelingSpec
 from app.models.modeling_spec_join_dataset import ModelingSpecJoinDataset
 from app.services.dataset_profiles import get_latest_profile
@@ -46,10 +47,21 @@ class TrainingDataResult(BaseModel):
     warnings: list[str]
 
 
-async def build_training_dataframe(db: AsyncSession, spec: ModelingSpec) -> TrainingDataResult:
-    base_dataset = await db.get(Dataset, spec.dataset_id)
-    if base_dataset is None:
-        raise TrainingDataError("The spec's base dataset no longer exists.")
+async def _materialize_join_columns(
+    db: AsyncSession, base_dataset: Dataset, spec: ModelingSpec, needed_columns: list[str]
+) -> tuple[pd.DataFrame, DatasetProfile, list[dict], dict[str, str]]:
+    """Resolves the spec's join rows against base_dataset, validates join
+    keys and column-name collisions, downloads everything to temp files,
+    and executes one DuckDB query selecting `needed_columns`. Shared by
+    build_training_dataframe and scoring_data.build_scoring_dataframe --
+    only what happens to the result afterward (target handling, dtype/
+    warning bookkeeping) differs between the two.
+
+    base_dataset is an explicit parameter rather than looked up from
+    spec.dataset_id so scoring can pass a series-resolved dataset instead
+    of the spec's literal base dataset.
+
+    Returns (dataframe, base_profile, joins, owner)."""
     base_profile = await get_latest_profile(db, base_dataset)
     if base_profile is None:
         raise TrainingDataError("The base dataset has not finished profiling yet.")
@@ -104,8 +116,7 @@ async def build_training_dataframe(db: AsyncSession, spec: ModelingSpec) -> Trai
                 )
             owner[name] = alias
 
-    needed = [spec.target, *spec.candidate_features]
-    for name in needed:
+    for name in needed_columns:
         if name not in owner:
             raise TrainingDataError(f"Column '{name}' was not found in the base or any attached dataset.")
 
@@ -131,11 +142,11 @@ async def build_training_dataframe(db: AsyncSession, spec: ModelingSpec) -> Trai
                 f"ON base.{key_q} = {alias}.{key_q}"
             )
 
-        # dedupe (target + candidate_features could repeat a name) while
-        # preserving order, then select each once from its owning source
+        # dedupe (needed_columns could repeat a name) while preserving
+        # order, then select each once from its owning source
         seen: set[str] = set()
         select_cols = []
-        for name in needed:
+        for name in needed_columns:
             if name in seen:
                 continue
             seen.add(name)
@@ -146,6 +157,17 @@ async def build_training_dataframe(db: AsyncSession, spec: ModelingSpec) -> Trai
     finally:
         for p in tmp_paths:
             os.unlink(p)
+
+    return df, base_profile, joins, owner
+
+
+async def build_training_dataframe(db: AsyncSession, spec: ModelingSpec) -> TrainingDataResult:
+    base_dataset = await db.get(Dataset, spec.dataset_id)
+    if base_dataset is None:
+        raise TrainingDataError("The spec's base dataset no longer exists.")
+
+    needed = [spec.target, *spec.candidate_features]
+    df, base_profile, joins, owner = await _materialize_join_columns(db, base_dataset, spec, needed)
 
     warnings: list[str] = []
     has_inner_join = any(j["row"].join_type == "inner" for j in joins)

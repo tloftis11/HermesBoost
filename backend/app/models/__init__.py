@@ -10,6 +10,7 @@ from app.models.model_run import ModelRun
 from app.models.modeling_spec import ModelingSpec
 from app.models.modeling_spec_join_dataset import ModelingSpecJoinDataset
 from app.models.organization import Organization
+from app.models.scheduled_score import ScheduledScore
 
 __all__ = [
     "Organization",
@@ -24,4 +25,5 @@ __all__ = [
     "Model",
     "ModelRun",
     "ModelCandidate",
+    "ScheduledScore",
 ]
