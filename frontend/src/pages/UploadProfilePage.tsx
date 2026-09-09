@@ -129,13 +129,6 @@ export function UploadProfilePage() {
                     </div>
                   ) : (
                     <>
-                      <AiSummaryCard
-                        aiDescription={profile?.ai_description ?? null}
-                        pending={profile?.status !== "profiled"}
-                      />
-
-                      {profile?.columns && <ColumnProfileGrid columns={profile.columns} />}
-
                       <div className="card cta-bar">
                         <span>Ready to build something with this data?</span>
                         <button
@@ -147,6 +140,13 @@ export function UploadProfilePage() {
                           Describe what you want to do →
                         </button>
                       </div>
+
+                      <AiSummaryCard
+                        aiDescription={profile?.ai_description ?? null}
+                        pending={profile?.status !== "profiled"}
+                      />
+
+                      {profile?.columns && <ColumnProfileGrid columns={profile.columns} />}
                     </>
                   )}
                 </>
