@@ -14,7 +14,7 @@ from celery.utils.log import get_task_logger
 from sqlalchemy import select
 
 from app.celery_app import celery_app
-from app.db import async_session_maker
+from app.db import async_session_maker, engine
 from app.models.dataset import Dataset
 from app.models.dataset_profile import DatasetProfile
 from app.services import profiling
@@ -34,6 +34,21 @@ def profile_dataset(dataset_id: str) -> None:
 
 
 async def _profile_dataset_async(dataset_id: str) -> None:
+    try:
+        await _run(dataset_id)
+    finally:
+        # The engine's connection pool is a module-level singleton, but
+        # each Celery task invocation gets its own fresh event loop via
+        # asyncio.run() -- a pooled connection checked out in a *previous*
+        # call's loop is invalid in this one (asyncpg raises "Future
+        # attached to a different loop" if it's reused). Disposing here
+        # ensures the next task invocation starts with an empty pool and
+        # opens brand-new connections in its own loop, rather than handing
+        # a stale one across the boundary.
+        await engine.dispose()
+
+
+async def _run(dataset_id: str) -> None:
     async with async_session_maker() as db:
         dataset = await db.get(Dataset, dataset_id)
         if dataset is None:

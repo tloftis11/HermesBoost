@@ -15,7 +15,7 @@ from sklearn.pipeline import Pipeline
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.db import async_session_maker
+from app.db import async_session_maker, engine
 from app.models.model import Model
 from app.models.model_candidate import ModelCandidate
 from app.models.model_run import ModelRun
@@ -46,6 +46,21 @@ def train_model(model_run_id: str) -> None:
 
 
 async def _train_model_async(model_run_id: str) -> None:
+    try:
+        await _run(model_run_id)
+    finally:
+        # The engine's connection pool is a module-level singleton, but
+        # each Celery task invocation gets its own fresh event loop via
+        # asyncio.run() -- a pooled connection checked out in a *previous*
+        # call's loop is invalid in this one (asyncpg raises "Future
+        # attached to a different loop" if it's reused). Disposing here
+        # ensures the next task invocation starts with an empty pool and
+        # opens brand-new connections in its own loop, rather than handing
+        # a stale one across the boundary.
+        await engine.dispose()
+
+
+async def _run(model_run_id: str) -> None:
     async with async_session_maker() as db:
         run = await db.get(ModelRun, model_run_id)
         if run is None:
