@@ -30,5 +30,8 @@ class Settings(BaseSettings):
     # Local storage (only used when STORAGE_BACKEND == "local")
     LOCAL_STORAGE_DIR: str = "./_dev_storage"
 
+    # AutoML
+    FLAML_TIME_BUDGET_SECONDS: int = 60
+
 
 settings = Settings()

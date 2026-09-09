@@ -1,0 +1,85 @@
+import type { ModelCandidate } from "../types";
+
+const ALGORITHM_LABEL: Record<string, string> = {
+  logistic_regression: "Logistic Regression",
+  linear_regression: "Linear Regression",
+  random_forest: "Random Forest",
+  xgboost: "XGBoost",
+  lgbm: "Gradient Boosted Trees",
+  rf: "Random Forest",
+  extra_tree: "Extra Trees",
+  lrl1: "L1 Logistic Regression",
+};
+
+export function formatAlgorithm(algorithm: string): string {
+  if (algorithm.startsWith("flaml_")) {
+    const inner = algorithm.slice("flaml_".length);
+    return `${ALGORITHM_LABEL[inner] ?? inner} (FLAML-tuned)`;
+  }
+  return ALGORITHM_LABEL[algorithm] ?? algorithm;
+}
+
+function formatMetric(value: number | undefined): string {
+  return value === undefined ? "--" : value.toFixed(2);
+}
+
+interface LeaderboardProps {
+  candidates: ModelCandidate[];
+}
+
+export function Leaderboard({ candidates }: LeaderboardProps) {
+  const mlTask = candidates[0]?.ml_task;
+  const isClassification = mlTask === "classification";
+
+  return (
+    <div className="card">
+      <h3>Leaderboard</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Algorithm</th>
+            {isClassification ? (
+              <>
+                <th>AUC</th>
+                <th>Precision</th>
+                <th>Recall</th>
+                <th>Calibration err.</th>
+              </>
+            ) : (
+              <>
+                <th>R&sup2;</th>
+                <th>RMSE</th>
+                <th>MAE</th>
+              </>
+            )}
+            <th>Train time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((c) => (
+            <tr key={c.id} className={c.role === "recommended" ? "highlight" : undefined}>
+              <td className="mono">{c.role === "recommended" ? "Recommended" : "Baseline"}</td>
+              <td>{formatAlgorithm(c.algorithm)}</td>
+              {isClassification ? (
+                <>
+                  <td className="mono">{formatMetric(c.metrics.auc)}</td>
+                  <td className="mono">{formatMetric(c.metrics.precision)}</td>
+                  <td className="mono">{formatMetric(c.metrics.recall)}</td>
+                  <td className="mono">{formatMetric(c.metrics.calibration_error)}</td>
+                </>
+              ) : (
+                <>
+                  <td className="mono">{formatMetric(c.metrics.r2)}</td>
+                  <td className="mono">{formatMetric(c.metrics.rmse)}</td>
+                  <td className="mono">{formatMetric(c.metrics.mae)}</td>
+                </>
+              )}
+              <td className="mono">{c.train_time_seconds === null ? "--" : `${Number(c.train_time_seconds).toFixed(1)}s`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

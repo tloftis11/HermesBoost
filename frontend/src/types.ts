@@ -75,3 +75,66 @@ export interface ModelingSpecDetail {
   spec: ModelingSpec;
   messages: ChatMessage[];
 }
+
+export type ModelStatus = "training" | "ready" | "error";
+export type CandidateRole = "recommended" | "baseline";
+
+export interface FeatureImportanceItem {
+  feature: string;
+  importance: number;
+}
+
+export interface ModelCandidate {
+  id: string;
+  role: CandidateRole;
+  algorithm: string;
+  ml_task: string;
+  metrics: Record<string, number>;
+  feature_importance: FeatureImportanceItem[] | null;
+  hyperparams: Record<string, unknown> | null;
+  // Decimal on the backend -- Pydantic v2 serializes Decimal as a JSON
+  // string (e.g. "5.00"), not a number, to preserve precision.
+  train_time_seconds: string | null;
+}
+
+export interface KeyDriver {
+  feature: string;
+  plain_description: string;
+  relative_importance: number;
+}
+
+export interface ModelRun {
+  id: string;
+  status: "running" | "completed" | "error";
+  ml_task: string | null;
+  row_count_used: number | null;
+  warnings: string[] | null;
+  interpretation_summary: string | null;
+  interpretation_key_drivers: KeyDriver[] | null;
+  interpretation_model: string | null;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface ModelGuided {
+  id: string;
+  modeling_spec_id: string;
+  status: ModelStatus;
+  error_message: string | null;
+  active_candidate: ModelCandidate | null;
+  latest_run: ModelRun | null;
+}
+
+export interface Leaderboard {
+  id: string;
+  modeling_spec_id: string;
+  status: ModelStatus;
+  candidates: ModelCandidate[];
+  run: ModelRun | null;
+}
+
+export interface BuildModelResponse {
+  model_id: string;
+  model_run_id: string;
+}

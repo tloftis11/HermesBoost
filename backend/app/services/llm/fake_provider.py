@@ -8,6 +8,7 @@ from decimal import Decimal
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.llm.model_interpretation_schema import KeyDriver, ModelInterpretationResult
 from app.services.llm.modeling_spec_schema import ChatTurnResponse, ModelingSpecFields
 from app.services.llm.provider import LLMResult, StructuredLLMResult
 
@@ -20,6 +21,16 @@ CANNED_DESCRIPTION = (
 CANNED_REPLY = (
     "[Fake reply -- LLM_PROVIDER_MODE=fake] Set LLM_PROVIDER_MODE=live and a "
     "real ANTHROPIC_API_KEY for a real conversation."
+)
+
+CANNED_INTERPRETATION = ModelInterpretationResult(
+    summary_text=(
+        "[Fake interpretation -- LLM_PROVIDER_MODE=fake] Set LLM_PROVIDER_MODE=live "
+        "and a real ANTHROPIC_API_KEY for a real interpretation."
+    ),
+    key_drivers=[
+        KeyDriver(feature="placeholder_feature", plain_description="Fake driver for offline testing.", relative_importance=1.0),
+    ],
 )
 
 DEFAULT_FAKE_SPEC = ModelingSpecFields(
@@ -77,6 +88,8 @@ class FakeLLMProvider:
                 reply_message=CANNED_REPLY,
                 modeling_spec=_carry_forward_spec(messages),
             )
+        elif output_format is ModelInterpretationResult:
+            parsed = CANNED_INTERPRETATION
         else:
             parsed = output_format.model_construct()
 

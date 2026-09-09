@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { buildModel } from "../api/models";
 import type { Cadence, ColumnProfile, ModelingSpec } from "../types";
 
 interface SpecCardProps {
@@ -17,7 +20,25 @@ const TASK_TYPE_LABEL: Record<string, string> = {
 };
 
 export function SpecCard({ spec, availableColumns, onPatch, disabled }: SpecCardProps) {
+  const navigate = useNavigate();
+  const [building, setBuilding] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
   const addableColumns = availableColumns.filter((c) => !spec.candidate_features.includes(c.name));
+
+  const canBuild =
+    Boolean(spec.task_type) && Boolean(spec.target) && spec.candidate_features.length > 0 && !building;
+
+  const handleBuild = async () => {
+    setBuildError(null);
+    setBuilding(true);
+    try {
+      const { model_id } = await buildModel(spec.id);
+      navigate(`/models/${model_id}`);
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : "Could not start training");
+      setBuilding(false);
+    }
+  };
 
   const removeFeature = (name: string) => {
     onPatch({ candidate_features: spec.candidate_features.filter((f) => f !== name) });
@@ -126,9 +147,21 @@ export function SpecCard({ spec, availableColumns, onPatch, disabled }: SpecCard
       )}
 
       <div className="spec-foot">
-        <button type="button" className="btn primary" style={{ justifyContent: "center" }} disabled title="Coming soon">
-          Build models →
+        <button
+          type="button"
+          className="btn primary"
+          style={{ justifyContent: "center" }}
+          disabled={!canBuild}
+          title={canBuild ? undefined : "Set a target and at least one candidate feature first"}
+          onClick={handleBuild}
+        >
+          {building ? "Starting…" : "Build models →"}
         </button>
+        {buildError && (
+          <p className="spec-caption" style={{ color: "var(--bad)" }}>
+            {buildError}
+          </p>
+        )}
         <p className="spec-caption">
           HermesBoost proposes this from your description -- you're always in control before anything runs.
         </p>

@@ -1,4 +1,5 @@
-"""Prompt construction for LLM tasks: dataset description and intent chat.
+"""Prompt construction for LLM tasks: dataset description, intent chat, and
+model interpretation.
 
 Only profiling statistics (never full data / raw rows beyond a small capped
 sample) are ever sent to the LLM. This is a hard design-doc requirement, not
@@ -67,4 +68,40 @@ def build_intent_chat_system_prompt(dataset_name: str, columns: list[dict]) -> s
         "- Keep reply_message short (1-3 sentences) and conversational -- "
         "point the user at the spec panel rather than restating it in "
         "prose."
+    )
+
+
+MODEL_INTERPRETATION_SYSTEM_PROMPT = (
+    "You are HermesBoost, an assistant that explains statistical model "
+    "results in plain English for domain experts who are not data "
+    "scientists. Given a leaderboard of candidate models (metrics only, no "
+    "raw data) and the feature importances of the recommended model, write "
+    "a short summary and a list of key drivers. Rules:\n"
+    "- summary_text: 2-4 sentences covering how well the recommended model "
+    "performs in practical terms, and anything worth flagging (e.g. a small "
+    "row count, a class imbalance visible in the metrics, a wide gap "
+    "between the recommended model and the baselines).\n"
+    "- key_drivers: for each of the top few features (by importance), a "
+    "short plain-language description of what it is and why it likely "
+    "matters -- not just restating the number.\n"
+    "- Never invent a metric, feature, or algorithm not present in the "
+    "data given to you."
+)
+
+
+def build_model_interpretation_prompt(
+    spec, leaderboard: list[dict], recommended_importances: list[dict]
+) -> str:
+    payload = {
+        "task_description": spec.task_description,
+        "target": spec.target,
+        "evaluation_metric": spec.evaluation_metric,
+        "leaderboard": leaderboard,  # [{algorithm, role, metrics}, ...] -- metrics only, never raw data
+        "recommended_model_feature_importance": recommended_importances,
+    }
+    return (
+        "Model results (metrics and feature importances only -- never raw "
+        "training data):\n\n"
+        f"{json.dumps(payload, default=str, indent=2)}\n\n"
+        "Write the interpretation now."
     )

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import datasets, health, modeling_specs, profiles
+from app.routers import datasets, health, modeling_specs, models, profiles
 
 
 def create_app() -> FastAPI:
@@ -20,6 +20,7 @@ def create_app() -> FastAPI:
     app.include_router(datasets.router, prefix="/api/v1")
     app.include_router(profiles.router, prefix="/api/v1")
     app.include_router(modeling_specs.router, prefix="/api/v1")
+    app.include_router(models.router, prefix="/api/v1")
 
     return app
 

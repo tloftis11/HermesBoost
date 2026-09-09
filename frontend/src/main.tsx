@@ -6,6 +6,7 @@ import "./styles/tokens.css";
 import "./styles/layout.css";
 import "./styles/upload-profile.css";
 import "./styles/intent-chat.css";
+import "./styles/model-results.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

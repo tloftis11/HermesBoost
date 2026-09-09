@@ -66,6 +66,7 @@ async def client(db_session, monkeypatch, tmp_path):
     # not the worker pipeline itself -- that's covered by the full local
     # smoke test. Stub the enqueue call to a no-op recorder.
     monkeypatch.setattr("app.routers.datasets.profile_dataset.delay", lambda *a, **k: None)
+    monkeypatch.setattr("app.routers.models.train_model.delay", lambda *a, **k: None)
 
     # Force local, tmp-dir-scoped storage regardless of the developer's local
     # .env -- STORAGE_BACKEND=supabase during dev once leaked real file writes
