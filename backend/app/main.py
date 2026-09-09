@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import (
     api_keys,
+    data_acquisition,
     dataset_series,
     datasets,
     health,
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(dataset_series.router, prefix="/api/v1")
     app.include_router(api_keys.router, prefix="/api/v1")
     app.include_router(risk_scores.router, prefix="/api/v1")
+    app.include_router(data_acquisition.router, prefix="/api/v1")
 
     return app
 

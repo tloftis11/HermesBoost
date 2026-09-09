@@ -88,6 +88,33 @@ async def get_dataset(
     return dataset
 
 
+@router.post("/{dataset_id}/confirm", response_model=DatasetCreateResponse, status_code=status.HTTP_202_ACCEPTED)
+async def confirm_dataset(
+    dataset_id: str, organization_id: CurrentOrgId, db: DbSession
+) -> DatasetCreateResponse:
+    """Promotes a dataset staged by the data-acquisition assistant into a
+    real, usable one -- the same profiling path a fresh upload takes.
+    Staging never does this itself; the user must explicitly confirm."""
+    dataset = await _get_org_dataset(db, dataset_id, organization_id)
+    if not dataset.pending_confirmation:
+        raise HTTPException(status_code=400, detail="This dataset isn't awaiting confirmation.")
+
+    dataset.pending_confirmation = False
+    dataset.status = "profiling"
+    await db.commit()
+
+    await asyncio.to_thread(profile_dataset.delay, dataset_id)
+
+    return DatasetCreateResponse(id=dataset_id, status=dataset.status)
+
+
+@router.delete("/{dataset_id}", status_code=204)
+async def delete_dataset(dataset_id: str, organization_id: CurrentOrgId, db: DbSession) -> None:
+    dataset = await _get_org_dataset(db, dataset_id, organization_id)
+    await db.delete(dataset)
+    await db.commit()
+
+
 async def _get_org_dataset(db, dataset_id: str, organization_id: str) -> Dataset:
     try:
         uuid.UUID(dataset_id)  # validate shape only; the column itself is a string

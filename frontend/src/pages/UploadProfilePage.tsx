@@ -67,6 +67,8 @@ export function UploadProfilePage() {
         error_message: null,
         series_id: null,
         as_of_date: null,
+        pending_confirmation: false,
+        source_url: null,
         created_at: new Date().toISOString(),
       });
       setSelectedId(created.id);
@@ -111,6 +113,8 @@ export function UploadProfilePage() {
         error_message: null,
         series_id: seriesId,
         as_of_date: asOfDate,
+        pending_confirmation: false,
+        source_url: null,
         created_at: new Date().toISOString(),
       });
       setSelectedId(uploaded.id);
@@ -150,7 +154,7 @@ export function UploadProfilePage() {
             </div>
           )}
 
-          <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 16, display: "flex", gap: 8 }}>
             <button
               type="button"
               className="btn ghost"
@@ -158,7 +162,11 @@ export function UploadProfilePage() {
             >
               {showSeriesPanel ? "Cancel" : "+ Add to a recurring series"}
             </button>
-
+            <button type="button" className="btn ghost" onClick={() => navigate("/data-acquisition")}>
+              Not sure what data you need?
+            </button>
+          </div>
+          <div>
             {showSeriesPanel && (
               <div className="card" style={{ marginTop: 10, maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
                 <p className="spec-caption">

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Uuid, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -34,6 +34,12 @@ class Dataset(Base):
         Uuid(as_uuid=False), ForeignKey("dataset_series.id"), nullable=True
     )
     as_of_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Set by the data-acquisition assistant's stage_dataset tool -- a
+    # staged dataset sits here until the user explicitly confirms it via
+    # POST /datasets/{id}/confirm, which is what actually kicks off
+    # profiling. False/None for every normal upload.
+    pending_confirmation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_url: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

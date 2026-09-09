@@ -9,6 +9,8 @@ export interface Dataset {
   error_message: string | null;
   series_id: string | null;
   as_of_date: string | null;
+  pending_confirmation: boolean;
+  source_url: string | null;
   created_at: string;
 }
 
@@ -231,4 +233,29 @@ export interface RiskScoreResult {
   score_date: string | null;
   rows: RiskScoreRow[];
   total_row_count: number;
+}
+
+export interface DataAcquisitionSession {
+  id: string;
+  problem_description: string;
+  status: string;
+  created_at: string;
+}
+
+export interface DataAcquisitionMessage {
+  role: "user" | "assistant";
+  display_text: string;
+  staged_dataset_ids: string[];
+  created_at: string;
+}
+
+export interface DataAcquisitionTurnResponse {
+  session: DataAcquisitionSession;
+  reply_message: string;
+  staged_dataset_ids: string[];
+}
+
+export interface DataAcquisitionSessionDetail {
+  session: DataAcquisitionSession;
+  messages: DataAcquisitionMessage[];
 }

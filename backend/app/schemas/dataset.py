@@ -17,6 +17,8 @@ class DatasetOut(BaseModel):
     error_message: str | None = None
     series_id: str | None = None
     as_of_date: date | None = None
+    pending_confirmation: bool = False
+    source_url: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

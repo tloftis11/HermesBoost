@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.llm.model_interpretation_schema import KeyDriver, ModelInterpretationResult
 from app.services.llm.modeling_spec_schema import ChatTurnResponse, ModelingSpecFields
-from app.services.llm.provider import LLMResult, StructuredLLMResult
+from app.services.llm.provider import LLMResult, StructuredLLMResult, ToolLoopResult
 
 CANNED_DESCRIPTION = (
     "[Fake description -- LLM_PROVIDER_MODE=fake] This dataset was profiled "
@@ -101,6 +101,33 @@ class FakeLLMProvider:
             cost_estimate_usd=Decimal("0"),
             stop_reason="end_turn",
             request_id=None,
+        )
+
+    async def run_tool_loop(
+        self,
+        *,
+        db: AsyncSession,
+        task_type: str,
+        organization_id: str,
+        messages: list[dict],
+        tools: list,
+        system: str,
+        trigger: str | None = None,
+        related_table: str | None = None,
+        related_id: str | None = None,
+        max_tokens: int = 8192,
+    ) -> ToolLoopResult:
+        # No real tool calls in fake mode -- just echo a canned reply and
+        # append it to history, so the surrounding plumbing (persistence,
+        # response shape) is still exercisable offline.
+        history = [*messages, {"role": "assistant", "content": [{"type": "text", "text": CANNED_REPLY}]}]
+        return ToolLoopResult(
+            reply_text=CANNED_REPLY,
+            raw_messages=history,
+            model_id="fake-model",
+            input_tokens=0,
+            output_tokens=0,
+            cost_estimate_usd=Decimal("0"),
         )
 
 

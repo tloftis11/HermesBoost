@@ -1,6 +1,8 @@
 import io
 import uuid
 
+from app.models.dataset import Dataset
+
 
 async def test_upload_and_list_dataset(client):
     csv_bytes = b"a,b\n1,2\n3,4\n"
@@ -45,6 +47,54 @@ async def test_rejects_empty_file(client):
     files = {"file": ("empty.csv", io.BytesIO(b""), "text/csv")}
     resp = await client.post("/api/v1/datasets", files=files)
     assert resp.status_code == 400
+
+
+async def _make_staged_dataset(db_session, default_org_id) -> Dataset:
+    dataset = Dataset(
+        organization_id=default_org_id,
+        name="staged.csv",
+        storage_path=f"{default_org_id}/x/staged.csv",
+        content_hash="stagedhash",
+        status="uploaded",
+        pending_confirmation=True,
+        source_url="https://example.com/staged.csv",
+    )
+    db_session.add(dataset)
+    await db_session.commit()
+    await db_session.refresh(dataset)
+    return dataset
+
+
+async def test_confirm_staged_dataset_starts_profiling(client, db_session, default_org_id):
+    dataset = await _make_staged_dataset(db_session, default_org_id)
+
+    resp = await client.post(f"/api/v1/datasets/{dataset.id}/confirm")
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "profiling"
+
+    get_resp = await client.get(f"/api/v1/datasets/{dataset.id}")
+    assert get_resp.json()["pending_confirmation"] is False
+    assert get_resp.json()["status"] == "profiling"
+
+
+async def test_confirm_non_pending_dataset_400s(client):
+    csv_bytes = b"a,b\n1,2\n"
+    files = {"file": ("normal.csv", io.BytesIO(csv_bytes), "text/csv")}
+    upload_resp = await client.post("/api/v1/datasets", files=files)
+    dataset_id = upload_resp.json()["id"]
+
+    resp = await client.post(f"/api/v1/datasets/{dataset_id}/confirm")
+    assert resp.status_code == 400
+
+
+async def test_delete_dataset(client, db_session, default_org_id):
+    dataset = await _make_staged_dataset(db_session, default_org_id)
+
+    resp = await client.delete(f"/api/v1/datasets/{dataset.id}")
+    assert resp.status_code == 204
+
+    get_resp = await client.get(f"/api/v1/datasets/{dataset.id}")
+    assert get_resp.status_code == 404
 
 
 async def test_unknown_dataset_404s(client):

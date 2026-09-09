@@ -37,3 +37,11 @@ export async function createDatasetSeries(name: string): Promise<DatasetSeries> 
     body: JSON.stringify({ name }),
   });
 }
+
+export async function confirmDataset(datasetId: string): Promise<{ id: string; status: string }> {
+  return request(`/api/v1/datasets/${datasetId}/confirm`, { method: "POST" });
+}
+
+export async function deleteDataset(datasetId: string): Promise<void> {
+  await request<void>(`/api/v1/datasets/${datasetId}`, { method: "DELETE" });
+}
