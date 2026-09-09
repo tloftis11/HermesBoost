@@ -13,6 +13,7 @@ import {
 import { getModelForSpec } from "../api/models";
 import { ChatBubble } from "../components/ChatBubble";
 import { ChatComposer } from "../components/ChatComposer";
+import { DatasetListItem } from "../components/DatasetListItem";
 import { Sidebar } from "../components/Sidebar";
 import { SpecCard } from "../components/SpecCard";
 import type {
@@ -225,7 +226,29 @@ export function IntentChatPage() {
           </div>
         </div>
         <div className="content">
-          {loadError ? (
+          {!datasetId ? (
+            <div style={{ maxWidth: 480 }}>
+              <p className="panel-title">Choose a dataset to analyze</p>
+              <div className="ds-list">
+                {allDatasets.filter((d) => d.status === "profiled").length === 0 ? (
+                  <div className="empty-state">
+                    No profiled datasets yet -- upload one from the Datasets page first.
+                  </div>
+                ) : (
+                  allDatasets
+                    .filter((d) => d.status === "profiled")
+                    .map((d) => (
+                      <DatasetListItem
+                        key={d.id}
+                        dataset={d}
+                        selected={false}
+                        onSelect={(id) => navigate(`/datasets/${id}/analysis`)}
+                      />
+                    ))
+                )}
+              </div>
+            </div>
+          ) : loadError ? (
             <div className="card" style={{ borderColor: "var(--bad)", color: "var(--bad)" }}>
               {loadError}
             </div>

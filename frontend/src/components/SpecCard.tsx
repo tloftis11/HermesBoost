@@ -121,6 +121,88 @@ export function SpecCard({
     <div className="spec-card">
       <div className="spec-head">Proposed modeling spec</div>
 
+      <div className="spec-field">
+        <span className="spec-label">Data sources</span>
+        <div className="chip-row">
+          <span className="chip mono">{baseDatasetName}</span>
+          {joinDatasets.map((jd) => (
+            <span className="chip mono" key={jd.id}>
+              {jd.dataset_name} · {jd.join_key_column} ({jd.join_type})
+              <button
+                type="button"
+                className="chip-remove"
+                onClick={() => onDetachDataset(jd.id)}
+                disabled={disabled}
+                aria-label={`Detach ${jd.dataset_name}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        {attachableDatasets.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+            <select
+              className="spec-select"
+              value={attachDatasetId}
+              disabled={disabled || attaching}
+              onChange={(e) => handleSelectAttachDataset(e.target.value)}
+            >
+              <option value="">+ Attach a dataset</option>
+              {attachableDatasets.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            {attachDatasetId && attachCandidateColumns.length === 0 && (
+              <p className="spec-caption" style={{ color: "var(--bad)" }}>
+                No shared columns to join on -- can't attach this dataset.
+              </p>
+            )}
+            {attachCandidateColumns.length > 0 && (
+              <>
+                <select
+                  className="spec-select"
+                  value={attachJoinKey}
+                  disabled={disabled || attaching}
+                  onChange={(e) => setAttachJoinKey(e.target.value)}
+                >
+                  {attachCandidateColumns.map((name) => (
+                    <option key={name} value={name}>
+                      Join on {name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="spec-select"
+                  value={attachJoinType}
+                  disabled={disabled || attaching}
+                  onChange={(e) => setAttachJoinType(e.target.value as JoinType)}
+                >
+                  <option value="left">Left join -- keep all rows from {baseDatasetName}</option>
+                  <option value="inner">Inner join -- only matching rows</option>
+                </select>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ justifyContent: "center" }}
+                  disabled={disabled || attaching}
+                  onClick={handleConfirmAttach}
+                >
+                  {attaching ? "Attaching…" : "Attach dataset"}
+                </button>
+              </>
+            )}
+            {attachError && (
+              <p className="spec-caption" style={{ color: "var(--bad)" }}>
+                {attachError}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {!hasSpec ? (
         <p className="spec-caption">
           Describe what you want to do -- once there's enough to go on, a proposed spec will show up here.
@@ -135,88 +217,6 @@ export function SpecCard({
                 <span className="spec-value-sub">{spec.task_description}</span>
               )}
             </div>
-          </div>
-
-          <div className="spec-field">
-            <span className="spec-label">Data sources</span>
-            <div className="chip-row">
-              <span className="chip mono">{baseDatasetName}</span>
-              {joinDatasets.map((jd) => (
-                <span className="chip mono" key={jd.id}>
-                  {jd.dataset_name} · {jd.join_key_column} ({jd.join_type})
-                  <button
-                    type="button"
-                    className="chip-remove"
-                    onClick={() => onDetachDataset(jd.id)}
-                    disabled={disabled}
-                    aria-label={`Detach ${jd.dataset_name}`}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-            {attachableDatasets.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                <select
-                  className="spec-select"
-                  value={attachDatasetId}
-                  disabled={disabled || attaching}
-                  onChange={(e) => handleSelectAttachDataset(e.target.value)}
-                >
-                  <option value="">+ Attach a dataset</option>
-                  {attachableDatasets.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-                {attachDatasetId && attachCandidateColumns.length === 0 && (
-                  <p className="spec-caption" style={{ color: "var(--bad)" }}>
-                    No shared columns to join on -- can't attach this dataset.
-                  </p>
-                )}
-                {attachCandidateColumns.length > 0 && (
-                  <>
-                    <select
-                      className="spec-select"
-                      value={attachJoinKey}
-                      disabled={disabled || attaching}
-                      onChange={(e) => setAttachJoinKey(e.target.value)}
-                    >
-                      {attachCandidateColumns.map((name) => (
-                        <option key={name} value={name}>
-                          Join on {name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="spec-select"
-                      value={attachJoinType}
-                      disabled={disabled || attaching}
-                      onChange={(e) => setAttachJoinType(e.target.value as JoinType)}
-                    >
-                      <option value="left">Left join -- keep all rows from {baseDatasetName}</option>
-                      <option value="inner">Inner join -- only matching rows</option>
-                    </select>
-                    <button
-                      type="button"
-                      className="btn ghost"
-                      style={{ justifyContent: "center" }}
-                      disabled={disabled || attaching}
-                      onClick={handleConfirmAttach}
-                    >
-                      {attaching ? "Attaching…" : "Attach dataset"}
-                    </button>
-                  </>
-                )}
-                {attachError && (
-                  <p className="spec-caption" style={{ color: "var(--bad)" }}>
-                    {attachError}
-                  </p>
-                )}
-              </div>
-            )}
           </div>
 
           <div className="spec-field">
