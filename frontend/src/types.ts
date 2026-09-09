@@ -154,6 +154,7 @@ export interface ModelListItem {
   task_description: string | null;
   status: ModelStatus;
   algorithm: string | null;
+  ml_task: string | null;
   primary_metric_label: string | null;
   primary_metric_value: number | null;
   updated_at: string;
@@ -203,4 +204,29 @@ export interface ApiKeyOut {
 
 export interface ApiKeyCreated extends ApiKeyOut {
   raw_key: string;
+}
+
+export interface RiskScoreOut {
+  id: string;
+  name: string;
+  probability_model_id: string;
+  magnitude_model_id: string;
+  positive_label: string;
+  created_at: string;
+}
+
+export interface RiskScoreRow {
+  entity_id: string;
+  score_date: string;
+  probability: number;
+  predicted_magnitude: number;
+  risk_score: number;
+}
+
+export interface RiskScoreResult {
+  id: string;
+  name: string;
+  score_date: string | null;
+  rows: RiskScoreRow[];
+  total_row_count: number;
 }

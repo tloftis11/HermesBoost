@@ -71,6 +71,7 @@ class ModelListItemOut(BaseModel):
     task_description: str | None = None
     status: str
     algorithm: str | None = None
+    ml_task: str | None = None
     primary_metric_label: str | None = None
     primary_metric_value: float | None = None
     updated_at: datetime

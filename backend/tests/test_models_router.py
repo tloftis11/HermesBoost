@@ -202,6 +202,7 @@ async def test_list_models_returns_shape_and_ordering(client, confirmed_spec, co
     assert item["dataset_name"] == "types_sample.csv"
     assert item["status"] == "ready"
     assert item["algorithm"] == "flaml_lgbm"
+    assert item["ml_task"] == "classification"
     assert item["primary_metric_label"] == "AUC"
     assert item["primary_metric_value"] == 0.8
 

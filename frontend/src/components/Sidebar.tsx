@@ -83,6 +83,22 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    key: "risk-scores",
+    label: "Risk Scores",
+    to: "/risk-scores",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+        <path
+          d="M10 2.5 3 6v5.5c0 4 3 6.7 7 8.5 4-1.8 7-4.5 7-8.5V6l-7-3.5Z"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+        <path d="M7 10.3l2.2 2.2L13.5 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     key: "settings",
     label: "Settings",
     to: "/settings",

@@ -53,12 +53,14 @@ async def list_models(organization_id: CurrentOrgId, db: DbSession) -> list[Mode
         dataset = await db.get(Dataset, spec.dataset_id) if spec else None
 
         algorithm = None
+        ml_task = None
         metric_label = None
         metric_value = None
         if model.active_candidate_id:
             candidate = await db.get(ModelCandidate, model.active_candidate_id)
             if candidate:
                 algorithm = candidate.algorithm
+                ml_task = candidate.ml_task
                 metric_key_label = _PRIMARY_METRIC_BY_TASK.get(candidate.ml_task)
                 if metric_key_label:
                     metric_key, metric_label = metric_key_label
@@ -72,6 +74,7 @@ async def list_models(organization_id: CurrentOrgId, db: DbSession) -> list[Mode
                 task_description=spec.task_description if spec else None,
                 status=model.status,
                 algorithm=algorithm,
+                ml_task=ml_task,
                 primary_metric_label=metric_label,
                 primary_metric_value=metric_value,
                 updated_at=model.updated_at,
