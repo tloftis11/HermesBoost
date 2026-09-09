@@ -32,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     key: "new-analysis",
     label: "New Analysis",
+    to: "/",
     icon: (
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
         <path
