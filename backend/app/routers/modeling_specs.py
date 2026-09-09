@@ -23,6 +23,7 @@ from app.services.dataset_profiles import get_latest_profile
 from app.services.llm.modeling_spec_schema import ChatTurnResponse
 from app.services.llm.prompts import build_intent_chat_system_prompt
 from app.services.llm.provider import RefusalError, get_llm_provider
+from app.services.ml.join_schema import resolve_spec_columns
 
 router = APIRouter(tags=["modeling-specs"])
 
@@ -81,7 +82,7 @@ async def send_message(
     spec = await _get_org_spec(db, spec_id, organization_id)
     dataset = await _get_org_dataset(db, spec.dataset_id, organization_id)
     profile = await get_latest_profile(db, dataset)
-    columns = profile.columns if profile else []
+    columns = await resolve_spec_columns(db, spec, dataset, profile) if profile else []
 
     history = await _load_messages(db, spec_id)
     api_messages = [{"role": m.role, "content": m.content} for m in history]

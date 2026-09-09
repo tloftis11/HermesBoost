@@ -40,20 +40,48 @@ def build_dataset_description_prompt(profile: dict, sample_rows: list[dict]) -> 
 def build_intent_chat_system_prompt(dataset_name: str, columns: list[dict]) -> str:
     """System prompt for the intent-chat task.
 
-    `columns` is the dataset's profiled column list (name + dtype + null
-    rate, etc. -- from dataset_profiles.columns): the model must only ever
-    propose `candidate_features` from these real column names, never invent
-    one. It must also re-emit the FULL current modeling spec every turn once
-    one exists (carrying forward unchanged fields), since the caller
-    overwrites the stored spec with whatever comes back rather than merging
-    a diff.
+    `columns` covers the base dataset *and any attached join datasets*:
+    {"name", "dtype", "source", "usable"} entries, as produced by
+    app.services.ml.join_schema.resolve_spec_columns. `source` says which
+    dataset a column came from ("shared join key" for a join key column,
+    which is deduplicated across the join); `usable` is False for a name
+    that collides across more than one attached dataset and so can never
+    actually be selected (candidate_features aren't qualified by source
+    dataset). The model must only ever propose `candidate_features` from
+    the usable names, never invent one. It must also re-emit the FULL
+    current modeling spec every turn once one exists (carrying forward
+    unchanged fields), since the caller overwrites the stored spec with
+    whatever comes back rather than merging a diff.
     """
-    column_summary = [{"name": c["name"], "dtype": c["dtype"]} for c in columns]
+    usable = [c for c in columns if c["usable"]]
+    ambiguous_names = sorted({c["name"] for c in columns if not c["usable"]})
+    other_sources = {c["source"] for c in usable} - {dataset_name, "shared join key"}
+
+    column_summary = [{"name": c["name"], "dtype": c["dtype"], "source": c["source"]} for c in usable]
+    joins_note = ""
+    if other_sources:
+        joins_note = (
+            "\nSome of these columns come from datasets joined onto "
+            f"'{dataset_name}' -- the 'source' field says which. A joined "
+            "column is just as valid a candidate_feature or target as one "
+            "from the base dataset; you don't need to qualify or otherwise "
+            "mark its source.\n"
+        )
+    ambiguous_note = ""
+    if ambiguous_names:
+        ambiguous_note = (
+            "\nThese column names exist in more than one attached dataset "
+            f"and can't be used as-is, since features aren't qualified by "
+            f"source dataset: {ambiguous_names}. Never propose one of these "
+            "as a candidate_feature, target, or entity_id_column.\n"
+        )
+
     return (
         "You are HermesBoost's intent-parsing assistant. A domain expert -- "
         "not a data scientist -- is describing what they want to do with a "
         f"dataset called '{dataset_name}'. Its actual columns are:\n\n"
-        f"{json.dumps(column_summary, indent=2)}\n\n"
+        f"{json.dumps(column_summary, indent=2)}\n"
+        f"{joins_note}{ambiguous_note}\n"
         "Your job: hold a short, plain-English conversation, and once you "
         "understand enough, propose a modeling spec (task_type, "
         "task_description, target, candidate_features, evaluation_metric, "
