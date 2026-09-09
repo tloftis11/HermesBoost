@@ -123,6 +123,7 @@ async def send_message(
         spec.target = fields.target
         spec.candidate_features = fields.candidate_features
         spec.evaluation_metric = fields.evaluation_metric
+        spec.entity_id_column = fields.entity_id_column
         spec.retrain_cadence = fields.retrain_cadence
         spec.score_cadence = fields.score_cadence
 
@@ -143,6 +144,8 @@ async def update_modeling_spec(
 
     if body.candidate_features is not None:
         spec.candidate_features = body.candidate_features
+    if body.entity_id_column is not None:
+        spec.entity_id_column = body.entity_id_column
     if body.retrain_cadence is not None:
         spec.retrain_cadence = body.retrain_cadence
     if body.score_cadence is not None:

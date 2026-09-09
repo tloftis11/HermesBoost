@@ -28,6 +28,7 @@ class ModelingSpec(Base):
     target: Mapped[str | None] = mapped_column(String, nullable=True)
     candidate_features: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     evaluation_metric: Mapped[str | None] = mapped_column(String, nullable=True)
+    entity_id_column: Mapped[str | None] = mapped_column(String, nullable=True)
     retrain_cadence: Mapped[str] = mapped_column(String, nullable=False, default="weekly")
     score_cadence: Mapped[str] = mapped_column(String, nullable=False, default="daily")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

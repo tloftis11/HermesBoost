@@ -55,12 +55,21 @@ async def _resolve_latest_in_series(db: AsyncSession, series_id: str, organizati
     return dataset
 
 
-def _resolve_entity_id_column(base_profile_columns: list[dict]) -> str | None:
+def _resolve_entity_id_column(base_profile_columns: list[dict], override: str | None = None) -> str | None:
     """A natural key like a county FIPS code may not be predictive and thus
     never selected as a candidate feature -- look across the base dataset's
     *full* profiled column list, not just candidate_features. Zero or more
     than one "id"-dtype column falls back to positional row index rather
-    than guessing which one is the right entity identifier."""
+    than guessing which one is the right entity identifier.
+
+    `override` (a spec's explicit entity_id_column) takes precedence over
+    that guess entirely -- it's the escape hatch for panel/repeated-
+    observations data, where the entity column legitimately repeats across
+    rows (e.g. a FIPS code in a county-year panel) and so never qualifies
+    as dtype "id", which requires row-level uniqueness."""
+    if override is not None:
+        return override if any(c["name"] == override for c in base_profile_columns) else None
+
     id_columns = [c["name"] for c in base_profile_columns if c.get("dtype") == "id"]
     return id_columns[0] if len(id_columns) == 1 else None
 
@@ -82,7 +91,12 @@ async def build_scoring_dataframe(db: AsyncSession, spec: ModelingSpec) -> Scori
     if base_profile is None:
         raise ScoringDataError("The resolved dataset has not finished profiling yet.")
 
-    entity_id_column = _resolve_entity_id_column(base_profile.columns)
+    entity_id_column = _resolve_entity_id_column(base_profile.columns, override=spec.entity_id_column)
+    if spec.entity_id_column is not None and entity_id_column is None:
+        raise ScoringDataError(
+            f"This spec's entity_id_column '{spec.entity_id_column}' does not exist in the "
+            "resolved dataset -- check the spec's setting or the dataset's columns."
+        )
 
     needed = [*spec.candidate_features]
     if entity_id_column is not None and entity_id_column not in needed:

@@ -116,6 +116,63 @@ async def test_patch_modeling_spec_updates_features_and_cadence(client, profiled
     assert body["score_cadence"] == "daily"  # untouched field unchanged
 
 
+async def test_patch_modeling_spec_sets_entity_id_column(client, profiled_dataset):
+    create_resp = await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")
+    spec_id = create_resp.json()["id"]
+
+    resp = await client.patch(
+        f"/api/v1/modeling-specs/{spec_id}", json={"entity_id_column": "row_id"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["entity_id_column"] == "row_id"
+
+    detail = (await client.get(f"/api/v1/modeling-specs/{spec_id}")).json()
+    assert detail["spec"]["entity_id_column"] == "row_id"
+
+
+async def test_chat_flow_persists_entity_id_column_from_carried_forward_spec(
+    client, db_session, default_org_id, profiled_dataset
+):
+    # The fake provider's DEFAULT_FAKE_SPEC has no entity_id_column, but it
+    # carries forward whatever the most recent assistant turn's spec was --
+    # seed one directly to exercise that persistence path without touching
+    # the fake provider itself.
+    from app.models.chat_message import ChatMessage
+    from app.services.llm.modeling_spec_schema import ChatTurnResponse, ModelingSpecFields
+
+    create_resp = await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")
+    spec_id = create_resp.json()["id"]
+
+    seeded = ChatTurnResponse(
+        reply_message="seed",
+        modeling_spec=ModelingSpecFields(
+            task_type="classification",
+            task_description="seeded",
+            target="category",
+            candidate_features=["amount"],
+            evaluation_metric="accuracy",
+            entity_id_column="row_id",
+            retrain_cadence="weekly",
+            score_cadence="daily",
+        ),
+    )
+    db_session.add(
+        ChatMessage(
+            organization_id=default_org_id,
+            modeling_spec_id=spec_id,
+            role="assistant",
+            content=seeded.model_dump_json(),
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/modeling-specs/{spec_id}/messages", json={"message": "keep going"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["spec"]["entity_id_column"] == "row_id"
+
+
 async def test_unknown_modeling_spec_404s(client):
     resp = await client.get(f"/api/v1/modeling-specs/{uuid.uuid4()}")
     assert resp.status_code == 404

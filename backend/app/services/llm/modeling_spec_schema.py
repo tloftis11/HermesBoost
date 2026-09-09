@@ -27,6 +27,7 @@ class ModelingSpecFields(BaseModel):
     target: str
     candidate_features: list[str]
     evaluation_metric: str
+    entity_id_column: str | None = None
     retrain_cadence: Cadence
     score_cadence: Cadence
 

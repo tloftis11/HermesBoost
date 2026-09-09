@@ -15,6 +15,7 @@ class ModelingSpecOut(BaseModel):
     target: str | None = None
     candidate_features: list[str]
     evaluation_metric: str | None = None
+    entity_id_column: str | None = None
     retrain_cadence: Cadence
     score_cadence: Cadence
     created_at: datetime
@@ -25,6 +26,7 @@ class ModelingSpecOut(BaseModel):
 
 class ModelingSpecUpdate(BaseModel):
     candidate_features: list[str] | None = None
+    entity_id_column: str | None = None
     retrain_cadence: Cadence | None = None
     score_cadence: Cadence | None = None
 

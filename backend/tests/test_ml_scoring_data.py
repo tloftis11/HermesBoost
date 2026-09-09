@@ -34,6 +34,21 @@ def test_resolve_entity_id_column_multiple_falls_back_to_none():
     assert _resolve_entity_id_column(columns) is None
 
 
+def test_resolve_entity_id_column_override_bypasses_uniqueness_guess():
+    # "fips" repeats across a panel and so is profiled as plain "numeric",
+    # not "id" -- an explicit override should still resolve it directly.
+    columns = [
+        {"name": "fips", "dtype": "numeric"},
+        {"name": "year", "dtype": "numeric"},
+    ]
+    assert _resolve_entity_id_column(columns, override="fips") == "fips"
+
+
+def test_resolve_entity_id_column_override_not_in_columns_returns_none():
+    columns = [{"name": "fips", "dtype": "numeric"}]
+    assert _resolve_entity_id_column(columns, override="not_a_real_column") is None
+
+
 @pytest_asyncio.fixture
 async def storage(tmp_path):
     backend = LocalStorageBackend(base_dir=str(tmp_path))
@@ -167,6 +182,97 @@ async def test_build_scoring_dataframe_resolves_series(db_session, default_org_i
     assert result.resolved_dataset_id == newer.id  # resolved to the newer dataset in the series
     assert result.row_count == 7
     assert result.score_date == today
+
+
+def _panel_csv() -> bytes:
+    # Two entities ("A", "B"), each appearing twice (like two years of a
+    # panel) -- "entity" is not row-unique, so it would never be profiled
+    # as dtype "id" on its own.
+    lines = [
+        "entity,year,feature_a",
+        "A,2023,1.0",
+        "B,2023,2.0",
+        "A,2024,3.0",
+        "B,2024,4.0",
+    ]
+    return ("\n".join(lines) + "\n").encode()
+
+
+async def _make_panel_dataset(db_session, default_org_id, storage) -> Dataset:
+    csv_bytes = _panel_csv()
+    storage.upload("datasets", f"{default_org_id}/panel.csv", csv_bytes)
+    dataset = Dataset(
+        organization_id=default_org_id,
+        name="panel.csv",
+        storage_path=f"{default_org_id}/panel.csv",
+        content_hash="panelhash",
+        row_count=4,
+        column_count=3,
+        status="profiled",
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+    db_session.add(
+        DatasetProfile(
+            organization_id=default_org_id,
+            dataset_id=dataset.id,
+            content_hash="panelhash",
+            row_count=4,
+            column_count=3,
+            columns=[
+                {"name": "entity", "dtype": "categorical", "null_rate": 0.0},
+                {"name": "year", "dtype": "numeric", "null_rate": 0.0},
+                {"name": "feature_a", "dtype": "numeric", "null_rate": 0.0},
+            ],
+        )
+    )
+    await db_session.commit()
+    await db_session.refresh(dataset)
+    return dataset
+
+
+async def test_build_scoring_dataframe_honors_entity_id_column_override_on_panel_data(
+    db_session, default_org_id, storage
+):
+    dataset = await _make_panel_dataset(db_session, default_org_id, storage)
+    spec = ModelingSpec(
+        organization_id=default_org_id,
+        dataset_id=dataset.id,
+        status="confirmed",
+        task_type="regression",
+        target="feature_a",
+        candidate_features=["year"],
+        entity_id_column="entity",
+    )
+    db_session.add(spec)
+    await db_session.commit()
+    await db_session.refresh(spec)
+
+    result = await build_scoring_dataframe(db_session, spec)
+
+    assert result.entity_ids == ["A", "B", "A", "B"]  # repeats, not a positional index
+
+
+async def test_build_scoring_dataframe_rejects_bad_entity_id_column(db_session, default_org_id, storage):
+    dataset = await _make_panel_dataset(db_session, default_org_id, storage)
+    spec = ModelingSpec(
+        organization_id=default_org_id,
+        dataset_id=dataset.id,
+        status="confirmed",
+        task_type="regression",
+        target="feature_a",
+        candidate_features=["year"],
+        entity_id_column="not_a_real_column",
+    )
+    db_session.add(spec)
+    await db_session.commit()
+    await db_session.refresh(spec)
+
+    try:
+        await build_scoring_dataframe(db_session, spec)
+        assert False, "expected ScoringDataError"
+    except ScoringDataError as exc:
+        assert "not_a_real_column" in str(exc)
 
 
 async def test_build_scoring_dataframe_rejects_missing_column(db_session, default_org_id, storage):
