@@ -32,7 +32,7 @@ from app.schemas.risk_score import (
     RiskScoreRowOut,
 )
 from app.services.ml.persistence import load_model_artifact
-from app.services.ml.scoring_data import ScoringDataError, build_scoring_dataframe
+from app.services.ml.scoring_data import ScoringDataError, build_scoring_dataframe, dedupe_to_latest_period
 from app.services.storage import get_storage_backend
 
 MAX_ROWS = 5000
@@ -141,6 +141,7 @@ async def get_risk_scores(
         data = await build_scoring_dataframe(db, spec)
     except ScoringDataError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    data = dedupe_to_latest_period(data, spec.candidate_features)
 
     storage = get_storage_backend()
     prob_pipeline = load_model_artifact(storage.download(prob_candidate.storage_bucket, prob_candidate.storage_path))

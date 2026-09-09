@@ -38,6 +38,61 @@ class ScoringDataResult(BaseModel):
     row_count: int
 
 
+# Conventionally-named columns treated as a period indicator when
+# deduping panel data for scoring -- see dedupe_to_latest_period.
+_TIME_COLUMN_NAMES = {"year", "period", "date", "as_of_year", "time", "week", "month"}
+
+
+def dedupe_to_latest_period(result: ScoringDataResult, candidate_features: list[str]) -> ScoringDataResult:
+    """Panel/repeated-observations data -- the same entity_id across
+    several historical periods -- is a deliberate, supported shape for
+    *training* a rare-event classifier (see _resolve_entity_id_column's
+    docstring): a positive example may only exist in a handful of past
+    periods, so the training set legitimately repeats each entity once
+    per period. But scoring an entity's *current* risk is a different
+    question -- returning every historical period as its own row is
+    misleading, since a caller has no way to tell which row is "now" and
+    an entity can show wildly different scores across its own rows.
+
+    If a conventionally-named period column (year/date/period/etc.) is
+    present among the spec's candidate features, keep only each entity's
+    most recent row by that column. Entities that only appear once are
+    passed through unchanged, and if no period column is detected at all,
+    every row is scored as before -- this only ever narrows what's
+    already there, never invents a period where none is declared.
+    """
+    if len(set(result.entity_ids)) == len(result.entity_ids):
+        return result  # already one row per entity -- nothing to collapse
+
+    time_col = next((c for c in candidate_features if c.lower() in _TIME_COLUMN_NAMES), None)
+    if time_col is None or time_col not in result.dataframe.columns:
+        return result  # no detectable period column -- unchanged, as before
+
+    df = result.dataframe.copy()
+    df["_entity_id"] = result.entity_ids
+    # Unparseable/missing period values sort first (lowest priority) so a
+    # row with a real period value always wins the "most recent" slot.
+    df["_time"] = pd.to_numeric(df[time_col], errors="coerce").fillna(float("-inf"))
+    df["_orig_order"] = range(len(df))
+
+    keep = (
+        df.sort_values(["_time", "_orig_order"])
+        .groupby("_entity_id", sort=False)
+        .tail(1)["_orig_order"]
+        .sort_values()
+        .tolist()
+    )
+
+    return ScoringDataResult(
+        dataframe=result.dataframe.iloc[keep].reset_index(drop=True),
+        entity_ids=[result.entity_ids[i] for i in keep],
+        resolved_dataset_id=result.resolved_dataset_id,
+        score_date=result.score_date,
+        warnings=result.warnings,
+        row_count=len(keep),
+    )
+
+
 async def _resolve_latest_in_series(db: AsyncSession, series_id: str, organization_id: str) -> Dataset:
     result = await db.execute(
         select(Dataset)

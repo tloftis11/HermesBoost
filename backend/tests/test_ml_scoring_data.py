@@ -11,6 +11,7 @@ from app.services.ml.scoring_data import (
     _resolve_entity_id_column,
     _resolve_latest_in_series,
     build_scoring_dataframe,
+    dedupe_to_latest_period,
 )
 from app.services.storage import LocalStorageBackend, set_storage_backend_for_tests
 
@@ -273,6 +274,76 @@ async def test_build_scoring_dataframe_rejects_bad_entity_id_column(db_session, 
         assert False, "expected ScoringDataError"
     except ScoringDataError as exc:
         assert "not_a_real_column" in str(exc)
+
+
+async def test_dedupe_to_latest_period_keeps_latest_year_per_entity(db_session, default_org_id, storage):
+    dataset = await _make_panel_dataset(db_session, default_org_id, storage)
+    spec = ModelingSpec(
+        organization_id=default_org_id,
+        dataset_id=dataset.id,
+        status="confirmed",
+        task_type="regression",
+        target="feature_a",
+        candidate_features=["year", "feature_a"],
+        entity_id_column="entity",
+    )
+    db_session.add(spec)
+    await db_session.commit()
+    await db_session.refresh(spec)
+
+    result = await build_scoring_dataframe(db_session, spec)
+    assert result.entity_ids == ["A", "B", "A", "B"]  # both years scored, pre-dedupe
+
+    deduped = dedupe_to_latest_period(result, spec.candidate_features)
+
+    assert deduped.entity_ids == ["A", "B"]  # one row per entity, order preserved
+    assert deduped.row_count == 2
+    assert list(deduped.dataframe["year"]) == [2024, 2024]  # the later year won for both
+    assert list(deduped.dataframe["feature_a"]) == [3.0, 4.0]  # the 2024 rows' own values
+
+
+async def test_dedupe_to_latest_period_noop_when_no_duplicate_entities(db_session, default_org_id, storage):
+    dataset = await _make_dataset(
+        db_session, default_org_id, storage,
+        name="base.csv", content_hash="nodupe", csv_bytes=_csv(5),
+    )
+    spec = ModelingSpec(
+        organization_id=default_org_id,
+        dataset_id=dataset.id,
+        status="confirmed",
+        task_type="classification",
+        target="feature_a",
+        candidate_features=["feature_a"],
+    )
+    db_session.add(spec)
+    await db_session.commit()
+    await db_session.refresh(spec)
+
+    result = await build_scoring_dataframe(db_session, spec)
+    deduped = dedupe_to_latest_period(result, spec.candidate_features)
+
+    assert deduped is result  # already one row per entity -- passed through untouched
+
+
+async def test_dedupe_to_latest_period_noop_when_no_time_column_detected(db_session, default_org_id, storage):
+    dataset = await _make_panel_dataset(db_session, default_org_id, storage)
+    spec = ModelingSpec(
+        organization_id=default_org_id,
+        dataset_id=dataset.id,
+        status="confirmed",
+        task_type="regression",
+        target="feature_a",
+        candidate_features=["feature_a"],  # "year" not selected -- no detectable period column
+        entity_id_column="entity",
+    )
+    db_session.add(spec)
+    await db_session.commit()
+    await db_session.refresh(spec)
+
+    result = await build_scoring_dataframe(db_session, spec)
+    deduped = dedupe_to_latest_period(result, spec.candidate_features)
+
+    assert deduped.entity_ids == ["A", "B", "A", "B"]  # unchanged -- can't tell which row is "latest"
 
 
 async def test_build_scoring_dataframe_rejects_missing_column(db_session, default_org_id, storage):
