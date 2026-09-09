@@ -50,6 +50,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     key: "models",
     label: "Models",
+    to: "/models",
     icon: (
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
         <path

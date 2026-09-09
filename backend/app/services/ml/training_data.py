@@ -174,8 +174,13 @@ async def build_training_dataframe(db: AsyncSession, spec: ModelingSpec) -> Trai
 
     feature_dtypes: dict[str, str] = {}
     for name in spec.candidate_features:
-        source_dtype = owner_columns_lookup(name, owner, base_columns, joins)
-        feature_dtypes[name] = "numeric" if source_dtype == "numeric" else "categorical"
+        # Determined from the materialized dataframe's real pandas dtype,
+        # not the stored profile's dtype label -- a profile classifies an
+        # all-distinct numeric column as "id" (e.g. a naturally-unique
+        # measurement), which isn't "numeric" or "categorical", and treating
+        # it as categorical crashes the imputer (tries to fill a float64
+        # column with the string "__missing__").
+        feature_dtypes[name] = "numeric" if pd.api.types.is_numeric_dtype(df[name]) else "categorical"
 
         null_rate = df[name].isna().mean()
         if null_rate > FEATURE_NULL_REJECT_THRESHOLD:
@@ -201,14 +206,6 @@ async def build_training_dataframe(db: AsyncSession, spec: ModelingSpec) -> Trai
         row_count=len(df),
         warnings=warnings,
     )
-
-
-def owner_columns_lookup(name: str, owner: dict, base_columns: dict, joins: list) -> str:
-    alias = owner[name]
-    if alias == "base":
-        return base_columns[name]["dtype"]
-    join_idx = int(alias.split("_")[1])
-    return joins[join_idx]["columns"][name]["dtype"]
 
 
 def _download_to_tempfile(dataset: Dataset) -> str:

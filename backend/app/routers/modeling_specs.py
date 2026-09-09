@@ -5,10 +5,14 @@ from sqlalchemy import select
 
 from app.dependencies import CurrentOrgId, DbSession
 from app.models.chat_message import ChatMessage
+from app.models.dataset import Dataset
 from app.models.modeling_spec import ModelingSpec
+from app.models.modeling_spec_join_dataset import ModelingSpecJoinDataset
 from app.routers.datasets import _get_org_dataset
 from app.schemas.modeling_spec import (
     ChatMessageOut,
+    JoinDatasetIn,
+    JoinDatasetOut,
     ModelingSpecDetail,
     ModelingSpecOut,
     ModelingSpecUpdate,
@@ -147,6 +151,113 @@ async def update_modeling_spec(
     await db.commit()
     await db.refresh(spec)
     return spec
+
+
+@router.get("/modeling-specs/{spec_id}/join-datasets", response_model=list[JoinDatasetOut])
+async def list_join_datasets(
+    spec_id: str, organization_id: CurrentOrgId, db: DbSession
+) -> list[JoinDatasetOut]:
+    await _get_org_spec(db, spec_id, organization_id)
+    result = await db.execute(
+        select(ModelingSpecJoinDataset).where(ModelingSpecJoinDataset.modeling_spec_id == spec_id)
+    )
+    rows = list(result.scalars().all())
+
+    out: list[JoinDatasetOut] = []
+    for row in rows:
+        dataset = await db.get(Dataset, row.dataset_id)
+        out.append(
+            JoinDatasetOut(
+                id=row.id,
+                dataset_id=row.dataset_id,
+                dataset_name=dataset.name if dataset else "(deleted dataset)",
+                join_key_column=row.join_key_column,
+                join_type=row.join_type,
+            )
+        )
+    return out
+
+
+@router.post("/modeling-specs/{spec_id}/join-datasets", response_model=JoinDatasetOut, status_code=201)
+async def attach_join_dataset(
+    spec_id: str,
+    body: JoinDatasetIn,
+    organization_id: CurrentOrgId,
+    db: DbSession,
+) -> JoinDatasetOut:
+    spec = await _get_org_spec(db, spec_id, organization_id)
+
+    if body.dataset_id == spec.dataset_id:
+        raise HTTPException(status_code=400, detail="That's already this spec's base dataset.")
+
+    existing = await db.execute(
+        select(ModelingSpecJoinDataset).where(
+            ModelingSpecJoinDataset.modeling_spec_id == spec_id,
+            ModelingSpecJoinDataset.dataset_id == body.dataset_id,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=400, detail="That dataset is already attached to this spec.")
+
+    join_dataset = await _get_org_dataset(db, body.dataset_id, organization_id)
+    if join_dataset.status != "profiled":
+        raise HTTPException(status_code=400, detail="The attached dataset must finish profiling first.")
+
+    base_dataset = await _get_org_dataset(db, spec.dataset_id, organization_id)
+    base_profile = await get_latest_profile(db, base_dataset)
+    join_profile = await get_latest_profile(db, join_dataset)
+    if base_profile is None or join_profile is None:
+        raise HTTPException(status_code=400, detail="Both datasets must finish profiling first.")
+
+    base_columns = {c["name"] for c in base_profile.columns}
+    join_columns = {c["name"] for c in join_profile.columns}
+    if body.join_key_column not in base_columns or body.join_key_column not in join_columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column '{body.join_key_column}' must exist in both the base dataset "
+            "and the attached dataset.",
+        )
+
+    row = ModelingSpecJoinDataset(
+        organization_id=organization_id,
+        modeling_spec_id=spec_id,
+        dataset_id=body.dataset_id,
+        join_key_column=body.join_key_column,
+        join_type=body.join_type,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    return JoinDatasetOut(
+        id=row.id,
+        dataset_id=row.dataset_id,
+        dataset_name=join_dataset.name,
+        join_key_column=row.join_key_column,
+        join_type=row.join_type,
+    )
+
+
+@router.delete("/modeling-specs/{spec_id}/join-datasets/{join_id}", status_code=204)
+async def detach_join_dataset(
+    spec_id: str,
+    join_id: str,
+    organization_id: CurrentOrgId,
+    db: DbSession,
+) -> None:
+    await _get_org_spec(db, spec_id, organization_id)
+
+    try:
+        uuid.UUID(join_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Attached dataset not found") from None
+
+    row = await db.get(ModelingSpecJoinDataset, join_id)
+    if row is None or str(row.modeling_spec_id) != str(spec_id):
+        raise HTTPException(status_code=404, detail="Attached dataset not found")
+
+    await db.delete(row)
+    await db.commit()
 
 
 async def _get_org_spec(db: DbSession, spec_id: str, organization_id: str) -> ModelingSpec:

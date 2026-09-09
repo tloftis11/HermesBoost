@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -46,3 +47,19 @@ class SendMessageRequest(BaseModel):
 class SendMessageResponse(BaseModel):
     reply_message: str
     spec: ModelingSpecOut
+
+
+class JoinDatasetIn(BaseModel):
+    dataset_id: str
+    join_key_column: str
+    join_type: Literal["left", "inner"] = "left"
+
+
+class JoinDatasetOut(BaseModel):
+    id: str
+    dataset_id: str
+    dataset_name: str
+    join_key_column: str
+    join_type: str
+
+    model_config = {"from_attributes": True}

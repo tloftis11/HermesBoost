@@ -5,15 +5,66 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
 from app.dependencies import CurrentOrgId, DbSession
+from app.models.dataset import Dataset
 from app.models.model import Model
 from app.models.model_candidate import ModelCandidate
 from app.models.model_run import ModelRun
+from app.models.modeling_spec import ModelingSpec
 from app.routers.modeling_specs import _get_org_spec
-from app.schemas.model import BuildResponse, LeaderboardOut, ModelCandidateOut, ModelGuidedOut, ModelRunOut
+from app.schemas.model import (
+    BuildResponse,
+    LeaderboardOut,
+    ModelCandidateOut,
+    ModelGuidedOut,
+    ModelListItemOut,
+    ModelRunOut,
+)
 from app.services.ml.task_mapping import UnsupportedTaskTypeError, to_ml_task
 from app.tasks.train_model import train_model
 
 router = APIRouter(tags=["models"])
+
+_PRIMARY_METRIC_BY_TASK = {"classification": ("auc", "AUC"), "regression": ("r2", "R²")}
+
+
+@router.get("/models", response_model=list[ModelListItemOut])
+async def list_models(organization_id: CurrentOrgId, db: DbSession) -> list[ModelListItemOut]:
+    result = await db.execute(
+        select(Model).where(Model.organization_id == organization_id).order_by(Model.updated_at.desc())
+    )
+    models = list(result.scalars().all())
+
+    items: list[ModelListItemOut] = []
+    for model in models:
+        spec = await db.get(ModelingSpec, model.modeling_spec_id)
+        dataset = await db.get(Dataset, spec.dataset_id) if spec else None
+
+        algorithm = None
+        metric_label = None
+        metric_value = None
+        if model.active_candidate_id:
+            candidate = await db.get(ModelCandidate, model.active_candidate_id)
+            if candidate:
+                algorithm = candidate.algorithm
+                metric_key_label = _PRIMARY_METRIC_BY_TASK.get(candidate.ml_task)
+                if metric_key_label:
+                    metric_key, metric_label = metric_key_label
+                    metric_value = candidate.metrics.get(metric_key)
+
+        items.append(
+            ModelListItemOut(
+                id=model.id,
+                modeling_spec_id=model.modeling_spec_id,
+                dataset_name=dataset.name if dataset else "(deleted dataset)",
+                task_description=spec.task_description if spec else None,
+                status=model.status,
+                algorithm=algorithm,
+                primary_metric_label=metric_label,
+                primary_metric_value=metric_value,
+                updated_at=model.updated_at,
+            )
+        )
+    return items
 
 
 @router.post("/modeling-specs/{spec_id}/build", response_model=BuildResponse, status_code=202)

@@ -59,3 +59,18 @@ class LeaderboardOut(BaseModel):
     status: str
     candidates: list[ModelCandidateOut]
     run: ModelRunOut | None = None
+
+
+class ModelListItemOut(BaseModel):
+    """One row of the org-wide models list -- everything the list page
+    needs without a follow-up request per row."""
+
+    id: str
+    modeling_spec_id: str
+    dataset_name: str
+    task_description: str | None = None
+    status: str
+    algorithm: str | None = None
+    primary_metric_label: str | None = None
+    primary_metric_value: float | None = None
+    updated_at: datetime

@@ -119,3 +119,128 @@ async def test_patch_modeling_spec_updates_features_and_cadence(client, profiled
 async def test_unknown_modeling_spec_404s(client):
     resp = await client.get(f"/api/v1/modeling-specs/{uuid.uuid4()}")
     assert resp.status_code == 404
+
+
+@pytest_asyncio.fixture
+async def joinable_dataset(db_session, default_org_id) -> Dataset:
+    """A second profiled dataset sharing 'row_id' with profiled_dataset,
+    plus its own 'population' column, for join-dataset tests."""
+    dataset = Dataset(
+        organization_id=default_org_id,
+        name="region_stats.csv",
+        storage_path=f"{default_org_id}/z/region_stats.csv",
+        content_hash="joinhash456",
+        row_count=6,
+        column_count=2,
+        status="profiled",
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    db_session.add(
+        DatasetProfile(
+            organization_id=default_org_id,
+            dataset_id=dataset.id,
+            content_hash="joinhash456",
+            row_count=6,
+            column_count=2,
+            columns=[
+                {"name": "row_id", "dtype": "id"},
+                {"name": "population", "dtype": "numeric"},
+            ],
+        )
+    )
+    await db_session.commit()
+    await db_session.refresh(dataset)
+    return dataset
+
+
+async def test_attach_join_dataset(client, profiled_dataset, joinable_dataset):
+    spec_id = (await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")).json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/modeling-specs/{spec_id}/join-datasets",
+        json={"dataset_id": joinable_dataset.id, "join_key_column": "row_id", "join_type": "left"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["dataset_id"] == joinable_dataset.id
+    assert body["dataset_name"] == "region_stats.csv"
+    assert body["join_key_column"] == "row_id"
+    assert body["join_type"] == "left"
+
+    list_resp = await client.get(f"/api/v1/modeling-specs/{spec_id}/join-datasets")
+    assert list_resp.status_code == 200
+    assert [j["id"] for j in list_resp.json()] == [body["id"]]
+
+
+async def test_attach_join_dataset_rejects_base_dataset_as_target(client, profiled_dataset):
+    spec_id = (await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")).json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/modeling-specs/{spec_id}/join-datasets",
+        json={"dataset_id": profiled_dataset.id, "join_key_column": "row_id"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_attach_join_dataset_rejects_duplicate(client, profiled_dataset, joinable_dataset):
+    spec_id = (await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")).json()["id"]
+    body = {"dataset_id": joinable_dataset.id, "join_key_column": "row_id"}
+
+    first = await client.post(f"/api/v1/modeling-specs/{spec_id}/join-datasets", json=body)
+    assert first.status_code == 201
+
+    second = await client.post(f"/api/v1/modeling-specs/{spec_id}/join-datasets", json=body)
+    assert second.status_code == 400
+
+
+async def test_attach_join_dataset_rejects_missing_join_key(client, profiled_dataset, joinable_dataset):
+    spec_id = (await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")).json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/modeling-specs/{spec_id}/join-datasets",
+        json={"dataset_id": joinable_dataset.id, "join_key_column": "not_a_real_column"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_attach_join_dataset_rejects_unprofiled_dataset(client, db_session, default_org_id, profiled_dataset):
+    unprofiled = Dataset(
+        organization_id=default_org_id,
+        name="still_profiling.csv",
+        storage_path=f"{default_org_id}/w/still_profiling.csv",
+        content_hash="unprofiledhash",
+        status="profiling",
+    )
+    db_session.add(unprofiled)
+    await db_session.commit()
+
+    spec_id = (await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")).json()["id"]
+    resp = await client.post(
+        f"/api/v1/modeling-specs/{spec_id}/join-datasets",
+        json={"dataset_id": unprofiled.id, "join_key_column": "row_id"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_detach_join_dataset(client, profiled_dataset, joinable_dataset):
+    spec_id = (await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")).json()["id"]
+    join_id = (
+        await client.post(
+            f"/api/v1/modeling-specs/{spec_id}/join-datasets",
+            json={"dataset_id": joinable_dataset.id, "join_key_column": "row_id"},
+        )
+    ).json()["id"]
+
+    delete_resp = await client.delete(f"/api/v1/modeling-specs/{spec_id}/join-datasets/{join_id}")
+    assert delete_resp.status_code == 204
+
+    list_resp = await client.get(f"/api/v1/modeling-specs/{spec_id}/join-datasets")
+    assert list_resp.json() == []
+
+
+async def test_detach_unknown_join_dataset_404s(client, profiled_dataset):
+    spec_id = (await client.post(f"/api/v1/datasets/{profiled_dataset.id}/modeling-specs")).json()["id"]
+    resp = await client.delete(f"/api/v1/modeling-specs/{spec_id}/join-datasets/{uuid.uuid4()}")
+    assert resp.status_code == 404

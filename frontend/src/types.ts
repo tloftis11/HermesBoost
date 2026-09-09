@@ -138,3 +138,25 @@ export interface BuildModelResponse {
   model_id: string;
   model_run_id: string;
 }
+
+export interface ModelListItem {
+  id: string;
+  modeling_spec_id: string;
+  dataset_name: string;
+  task_description: string | null;
+  status: ModelStatus;
+  algorithm: string | null;
+  primary_metric_label: string | null;
+  primary_metric_value: number | null;
+  updated_at: string;
+}
+
+export type JoinType = "left" | "inner";
+
+export interface JoinDataset {
+  id: string;
+  dataset_id: string;
+  dataset_name: string;
+  join_key_column: string;
+  join_type: JoinType;
+}

@@ -181,3 +181,39 @@ async def test_get_model_for_spec_delegates_to_guided_view(client, confirmed_spe
     resp = await client.get(f"/api/v1/modeling-specs/{confirmed_spec.id}/models")
     assert resp.status_code == 200
     assert resp.json()["id"] == completed_model_with_leaderboard.id
+
+
+async def test_list_models_empty(client):
+    resp = await client.get("/api/v1/models")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_list_models_returns_shape_and_ordering(client, confirmed_spec, completed_model_with_leaderboard):
+    resp = await client.get("/api/v1/models")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+
+    item = items[0]
+    assert item["id"] == completed_model_with_leaderboard.id
+    assert item["dataset_name"] == "types_sample.csv"
+    assert item["status"] == "ready"
+    assert item["algorithm"] == "flaml_lgbm"
+    assert item["primary_metric_label"] == "AUC"
+    assert item["primary_metric_value"] == 0.8
+
+
+async def test_list_models_reflects_retrain_in_progress(client, confirmed_spec, completed_model_with_leaderboard):
+    # Retraining reuses the spec's existing model slot; active_candidate_id
+    # (and therefore the list's algorithm/metric) stays pointed at the
+    # previous run's winner until the new run completes.
+    build_resp = await client.post(f"/api/v1/modeling-specs/{confirmed_spec.id}/build")
+    assert build_resp.status_code == 202
+
+    resp = await client.get("/api/v1/models")
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["id"] == completed_model_with_leaderboard.id
+    assert items[0]["status"] == "training"
+    assert items[0]["algorithm"] == "flaml_lgbm"  # stale-but-valid, unchanged until the new run completes

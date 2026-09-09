@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { getLeaderboard } from "../api/models";
 import { getModelingSpec } from "../api/modelingSpecs";
 import { HyperparamsPanel } from "../components/HyperparamsPanel";
@@ -43,7 +43,7 @@ export function ModelResultsPage() {
       <div className="main">
         <div className="topbar">
           <div className="breadcrumb">
-            Models / <b>{breadcrumbLabel}</b>
+            <Link to="/models">Models</Link> / <b>{breadcrumbLabel}</b>
           </div>
           {model?.status === "ready" && (
             <div className="topbar-right">

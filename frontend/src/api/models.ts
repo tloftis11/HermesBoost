@@ -1,5 +1,9 @@
 import { request } from "./client";
-import type { BuildModelResponse, Leaderboard, ModelGuided } from "../types";
+import type { BuildModelResponse, Leaderboard, ModelGuided, ModelListItem } from "../types";
+
+export async function listModels(): Promise<ModelListItem[]> {
+  return request<ModelListItem[]>("/api/v1/models");
+}
 
 export async function buildModel(specId: string): Promise<BuildModelResponse> {
   return request<BuildModelResponse>(`/api/v1/modeling-specs/${specId}/build`, {
